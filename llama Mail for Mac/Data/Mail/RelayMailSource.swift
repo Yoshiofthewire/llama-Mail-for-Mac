@@ -1,0 +1,225 @@
+//
+//  RelayMailSource.swift
+//  llama Mail
+//
+//  MailSource backed by the relay endpoints, matching the Android reference
+//  RelayMailSource.kt / RelayModels.kt (Mobile_Mail_Relay.md) and verified
+//  against the live backend 2026-07-10:
+//    GET  /api/inbox?sub&hash&limit&mailbox&since
+//    GET  /api/inbox/folders?sub&hash
+//    POST /api/mail/send?sub&hash
+//  Binding contract: send body uses comma-joined recipient strings plus a
+//  "mode" field; /api/inbox returns emails grouped by tab.
+//
+
+import Foundation
+
+// MARK: - DTOs (match Mobile_Mail_Relay.md JSON exactly, like Android RelayModels.kt)
+
+/// Some deployments emit `cursor` as a bare JSON number rather than a quoted
+/// string; decode either shape (Android FlexibleCursorSerializer).
+struct FlexibleCursor: Decodable, Equatable, Sendable {
+    var value: String
+
+    init(_ value: String) {
+        self.value = value
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let string = try? container.decode(String.self) {
+            value = string
+        } else if let int = try? container.decode(Int.self) {
+            value = String(int)
+        } else if let double = try? container.decode(Double.self) {
+            value = String(double)
+        } else {
+            value = ""
+        }
+    }
+}
+
+struct RelayEmailDTO: Decodable, Equatable, Sendable {
+    var messageId: String
+    /// Single display string, e.g. "Ada Lovelace <ada@example.com>".
+    var sender: String?
+    var sentTo: String?
+    var cc: String?
+    var bcc: String?
+    var subject: String?
+    /// Nil (not "") on delta "updated" entries whose body was omitted.
+    var body: String?
+    var label: String?
+    /// "unread" unless the server says otherwise.
+    var status: String?
+    /// ISO-8601 timestamp.
+    var atUtc: String?
+    /// "new" or "updated"; only present when the response has delta=true.
+    var changeType: String?
+
+    func toDomain(folder: String, tab: String) -> Email {
+        let (name, address) = Self.splitSender(sender ?? "")
+        let keyword = (label?.isEmpty == false ? label : tab) ?? tab
+        return Email(
+            serverId: messageId,
+            folder: folder,
+            senderName: name,
+            senderEmail: address,
+            subject: subject ?? "",
+            body: body ?? "",
+            keywords: keyword.isEmpty ? [] : [keyword],
+            receivedAt: Self.parseUtc(atUtc) ?? Date(),
+            read: (status ?? "unread").lowercased() != "unread",
+            starred: false
+        )
+    }
+
+    /// Splits "Name <addr@host>" into display name and address; a bare
+    /// address fills both fields.
+    private static func splitSender(_ sender: String) -> (name: String, email: String) {
+        let trimmed = sender.trimmingCharacters(in: .whitespaces)
+        if let open = trimmed.lastIndex(of: "<"),
+           let close = trimmed.lastIndex(of: ">"),
+           open < close {
+            let name = String(trimmed[..<open])
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            let email = String(trimmed[trimmed.index(after: open)..<close])
+                .trimmingCharacters(in: .whitespaces)
+            return (name.isEmpty ? email : name, email)
+        }
+        if trimmed.contains("@") {
+            return (trimmed, trimmed)
+        }
+        return (trimmed, "")
+    }
+
+    private static func parseUtc(_ value: String?) -> Date? {
+        guard let value, !value.isEmpty else { return nil }
+        let plain = ISO8601DateFormatter()
+        if let date = plain.date(from: value) { return date }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value)
+    }
+}
+
+struct RelayInboxResponse: Decodable, Sendable {
+    var tabs: [String]?
+    var byTab: [String: [RelayEmailDTO]]?
+    var cursor: FlexibleCursor?
+    var delta: Bool?
+    var removed: [String]?
+
+    /// Flattens the per-tab groups; each email keeps its tab as a keyword.
+    func allEmails(folder: String) -> [Email] {
+        (byTab ?? [:]).flatMap { tab, emails in
+            emails.map { $0.toDomain(folder: folder, tab: tab) }
+        }
+    }
+}
+
+struct RelayFolderDTO: Decodable, Equatable, Sendable {
+    var path: String
+    var deletable: Bool?
+}
+
+struct RelayFolderListResponse: Decodable, Sendable {
+    var parent: String?
+    var folders: [RelayFolderDTO]?
+}
+
+struct RelaySendResponse: Decodable, Sendable {
+    var ok: Bool?
+    var sentSaved: Bool?
+    var warning: String?
+}
+
+/// Send body with comma-joined recipients (Mobile_Mail_Relay.md Part 6) —
+/// differs from contact sync's array-of-objects shape.
+struct RelaySendRequest: Encodable, Equatable, Sendable {
+    var to: String
+    var cc: String
+    var bcc: String
+    var subject: String
+    var body: String
+    var mode: String
+
+    init(from email: OutgoingEmail) {
+        to = email.to.joined(separator: ", ")
+        cc = email.cc.joined(separator: ", ")
+        bcc = email.bcc.joined(separator: ", ")
+        subject = email.subject
+        body = email.body
+        mode = "plain"
+    }
+}
+
+// MARK: - Source
+
+final class RelayMailSource: MailSource {
+    private let httpClient: HTTPClient
+    private let serverUrl: String
+    private let auth: RelayAuth
+
+    init(httpClient: HTTPClient, serverUrl: String, auth: RelayAuth) {
+        self.httpClient = httpClient
+        self.serverUrl = serverUrl
+        self.auth = auth
+    }
+
+    func listFolders() async throws -> [MailFolder] {
+        let response = try await httpClient.get(
+            RelayFolderListResponse.self,
+            url: try endpoint("api/inbox/folders"),
+            query: auth.queryItems
+        )
+        return (response.folders ?? []).map { MailFolder(name: $0.path) }
+    }
+
+    func fetchEmails(folder: String, from: Int, to: Int) async throws -> [Email] {
+        // ponytail: since=0 forces a full snapshot on every fetch. Cursor
+        // persistence + delta merging (Android MailCursorStore, Part 5) is v2;
+        // full snapshots pair with MailRepository.replaceFolderSnapshot.
+        let response = try await httpClient.get(
+            RelayInboxResponse.self,
+            url: try endpoint("api/inbox"),
+            query: auth.queryItems + [
+                URLQueryItem(name: "limit", value: String(max(to, 1))),
+                URLQueryItem(name: "mailbox", value: folder),
+                URLQueryItem(name: "since", value: "0"),
+            ]
+        )
+        return response.allEmails(folder: folder)
+    }
+
+    func search(folder: String, query: String) async throws -> [String] {
+        // The relay has no search endpoint (Android searches its local cache);
+        // inbox search runs against the EmailDAO cache instead.
+        throw MailSourceError.imapUnsupportedInV1
+    }
+
+    func setKeywords(folder: String, messageId: String, keywords: [String]) async throws {
+        // Relay tabs are server-assigned; there is no relay endpoint for
+        // client-side keyword edits.
+        throw MailSourceError.imapUnsupportedInV1
+    }
+
+    func send(email: OutgoingEmail) async throws {
+        _ = try await httpClient.post(
+            RelaySendResponse.self,
+            url: try endpoint("api/mail/send"),
+            query: auth.queryItems,
+            jsonBody: RelaySendRequest(from: email)
+        )
+    }
+
+    // MARK: - Private
+
+    private func endpoint(_ path: String) throws -> URL {
+        guard let url = URL(string: serverUrl) else {
+            throw MailSourceError.invalidServerURL
+        }
+        return url.appending(path: path)
+    }
+}

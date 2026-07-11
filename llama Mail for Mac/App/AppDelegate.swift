@@ -1,0 +1,176 @@
+//
+//  AppDelegate.swift
+//  llama Mail
+//
+//  Platform app delegates: APNs registration, token forwarding, incoming
+//  remote notifications, and pull-mode lifecycle (spec §3).
+//
+
+import Foundation
+import os
+
+/// Shared launch/lifecycle logic used by both platform delegates.
+@MainActor
+private enum PushLifecycle {
+    static func onLaunch() {
+        let graph = SingletonGraph.shared
+        graph.pushNotificationDispatcher.configure()
+        Task {
+            await graph.pushNotificationDispatcher.requestAuthorization()
+        }
+    }
+
+    static func onDeviceToken(_ deviceToken: Data) {
+        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        let graph = SingletonGraph.shared
+        graph.pushSettingsStore.lastDeviceToken = token
+        Task {
+            // Re-registration for safety on every token change (spec §3).
+            await graph.deviceRegistrationService.reregisterIfPaired(deviceToken: token)
+        }
+    }
+
+    static func onForeground() {
+        let graph = SingletonGraph.shared
+        if let token = graph.pushSettingsStore.lastDeviceToken {
+            Task {
+                await graph.deviceRegistrationService.reregisterIfPaired(deviceToken: token)
+            }
+        }
+        // Immediate pull on foreground, then 90s cadence (spec §3).
+        graph.pullPollingScheduler.startForegroundPolling()
+        Task {
+            await graph.pullPollingScheduler.pollNow()
+        }
+    }
+
+    static func onBackground() {
+        SingletonGraph.shared.pullPollingScheduler.stopForegroundPolling()
+    }
+
+    static func onRemoteNotification(_ userInfo: [AnyHashable: Any]) async {
+        await SingletonGraph.shared.pushNotificationDispatcher.handleIncoming(userInfo: userInfo)
+    }
+}
+
+#if os(iOS)
+import UIKit
+import BackgroundTasks
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        PushLifecycle.onLaunch()
+        application.registerForRemoteNotifications()
+        registerBackgroundPull()
+        return true
+    }
+
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        PushLifecycle.onForeground()
+    }
+
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        PushLifecycle.onBackground()
+        scheduleBackgroundPull()
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        PushLifecycle.onDeviceToken(deviceToken)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        Log.push.error("APNs registration failed: \(error.localizedDescription)")
+    }
+
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any]
+    ) async -> UIBackgroundFetchResult {
+        await PushLifecycle.onRemoteNotification(userInfo)
+        return .newData
+    }
+
+    // MARK: - Background pull (spec §3 pull mode)
+
+    private func registerBackgroundPull() {
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: Config.backgroundPullTaskId,
+            using: nil
+        ) { task in
+            Task { @MainActor in
+                await SingletonGraph.shared.pullPollingScheduler.pollNow()
+                task.setTaskCompleted(success: true)
+            }
+            Task { @MainActor in
+                self.scheduleBackgroundPull() // keep the chain going
+            }
+        }
+    }
+
+    private func scheduleBackgroundPull() {
+        guard SingletonGraph.shared.pushSettingsStore.deliveryMode == .pull else { return }
+        let request = BGAppRefreshTaskRequest(identifier: Config.backgroundPullTaskId)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: Config.backgroundPullInterval)
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            Log.push.error("Could not schedule background pull: \(error)")
+        }
+    }
+}
+
+#elseif os(macOS)
+import AppKit
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        PushLifecycle.onLaunch()
+        NSApplication.shared.registerForRemoteNotifications()
+        PushLifecycle.onForeground()
+
+        // macOS has no background app refresh; resume polling on wake and
+        // let the app poll full-time while running (spec FAQ).
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                await SingletonGraph.shared.pullPollingScheduler.pollNow()
+            }
+        }
+    }
+
+    func application(
+        _ application: NSApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        PushLifecycle.onDeviceToken(deviceToken)
+    }
+
+    func application(
+        _ application: NSApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        Log.push.error("APNs registration failed: \(error.localizedDescription)")
+    }
+
+    func application(
+        _ application: NSApplication,
+        didReceiveRemoteNotification userInfo: [String: Any]
+    ) {
+        Task {
+            await PushLifecycle.onRemoteNotification(userInfo)
+        }
+    }
+}
+#endif

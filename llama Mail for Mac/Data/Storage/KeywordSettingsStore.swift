@@ -1,0 +1,34 @@
+//
+//  KeywordSettingsStore.swift
+//  llama Mail
+//
+//  UserDefaults-backed per-keyword tab visibility (spec §2 Keyword Settings).
+//  Keywords with no stored override are visible by default.
+//
+
+import Foundation
+
+final class KeywordSettingsStore {
+    private static let key = "keywords.visibility"
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+    }
+
+    func isVisible(_ keyword: String) -> Bool {
+        overrides()[keyword] ?? true
+    }
+
+    func setVisible(_ visible: Bool, for keyword: String) {
+        var map = overrides()
+        map[keyword] = visible
+        defaults.set(map, forKey: Self.key)
+    }
+
+    /// All stored visibility overrides (keywords never toggled are absent).
+    func overrides() -> [String: Bool] {
+        defaults.dictionary(forKey: Self.key) as? [String: Bool] ?? [:]
+    }
+}

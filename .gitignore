@@ -1,0 +1,40 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Xcode build products
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Test artifacts
+*.xcresult
+
+# Code coverage
+*.profraw
+*.profdata
+
+# Environment / secrets (never commit APNs keys or credentials)
+*.p8
+*.p12
+*.pem
+*.mobileprovision
+.env
