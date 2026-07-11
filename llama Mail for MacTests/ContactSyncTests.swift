@@ -49,6 +49,22 @@ private func makeContact(
 
 // MARK: - Reconciliation
 
+private func makeDTO(
+    uid: String? = nil,
+    fn: String,
+    email: String,
+    deleted: Bool? = nil
+) -> ContactDTO {
+    ContactDTO(
+        uid: uid,
+        rev: 1,
+        deleted: deleted,
+        fn: fn,
+        emails: [ContactFieldDTO(label: nil, value: email)],
+        phones: []
+    )
+}
+
 @Suite struct ContactSyncReconciliationTests {
     @Test func matchesByContentRegardlessOfOrder() {
         let local = [
@@ -56,12 +72,12 @@ private func makeContact(
             makeContact(name: "Grace", email: "grace@example.com"),
         ]
         let response = [
-            ContactDeltaDTO(uid: "srv-g", name: "Grace", email: "grace@example.com"),
-            ContactDeltaDTO(uid: "srv-a", name: "Ada", email: "ada@example.com"),
+            makeDTO(uid: "srv-g", fn: "Grace", email: "grace@example.com"),
+            makeDTO(uid: "srv-a", fn: "Ada", email: "ada@example.com"),
         ]
         let assignments = ContactSyncReconciliation.reconcile(
             localPending: local,
-            responseDelta: response
+            responseChanged: response
         )
         #expect(assignments.count == 2)
         #expect(assignments.first { $0.localId == local[0].localId }?.uid == "srv-a")
@@ -75,12 +91,12 @@ private func makeContact(
             makeContact(name: "grace hopper", email: "grace@example.com"),
         ]
         let response = [
-            ContactDeltaDTO(uid: "srv-1", name: "Ada Lovelace", email: "ada@example.com"),
-            ContactDeltaDTO(uid: "srv-2", name: "Grace Hopper", email: "grace@example.com"),
+            makeDTO(uid: "srv-1", fn: "Ada Lovelace", email: "ada@example.com"),
+            makeDTO(uid: "srv-2", fn: "Grace Hopper", email: "grace@example.com"),
         ]
         let assignments = ContactSyncReconciliation.reconcile(
             localPending: local,
-            responseDelta: response
+            responseChanged: response
         )
         #expect(assignments.map(\.uid) == ["srv-1", "srv-2"])
         #expect(assignments.map(\.localId) == local.map(\.localId))
@@ -92,13 +108,13 @@ private func makeContact(
             makeContact(name: "Grace", email: "grace@example.com"),
         ]
         let response = [
-            ContactDeltaDTO(uid: "srv-x", name: "Someone", email: "x@example.com", deleted: true),
-            ContactDeltaDTO(name: "No uid", email: "nouid@example.com"),
-            ContactDeltaDTO(uid: "srv-a", name: "Ada", email: "ada@example.com"),
+            makeDTO(uid: "srv-x", fn: "Someone", email: "x@example.com", deleted: true),
+            makeDTO(fn: "No uid", email: "nouid@example.com"),
+            makeDTO(uid: "srv-a", fn: "Ada", email: "ada@example.com"),
         ]
         let assignments = ContactSyncReconciliation.reconcile(
             localPending: local,
-            responseDelta: response
+            responseChanged: response
         )
         // Only Ada matches; Grace stays pending for the next sync.
         #expect(assignments == [
@@ -108,10 +124,10 @@ private func makeContact(
 
     @Test func alreadySyncedContactsAreNotReassigned() {
         let local = [makeContact(uid: "srv-existing", name: "Ada", email: "ada@example.com")]
-        let response = [ContactDeltaDTO(uid: "srv-new", name: "Ada", email: "ada@example.com")]
+        let response = [makeDTO(uid: "srv-new", fn: "Ada", email: "ada@example.com")]
         let assignments = ContactSyncReconciliation.reconcile(
             localPending: local,
-            responseDelta: response
+            responseChanged: response
         )
         #expect(assignments.isEmpty)
     }
@@ -198,10 +214,16 @@ private func makeContact(
     @Test func fullSyncAssignsUidWithoutDuplicating() async throws {
         let json = """
         {
-          "delta": [
-            { "uid": "srv-ada", "name": "Ada", "email": "ada@example.com" }
+          "cursor": 456,
+          "changed": [
+            {
+              "uid": "srv-ada",
+              "rev": 1,
+              "fn": "Ada",
+              "emails": [{ "value": "ada@example.com" }]
+            }
           ],
-          "cursor": 456
+          "deleted": []
         }
         """
         let client = stubClient(json: json) { request in
@@ -209,9 +231,13 @@ private func makeContact(
                 request.url!.absoluteString
                     .hasPrefix("https://relay.example.com/api/contacts/sync?")
             )
+            // Queued local changes go out as a push (POST {baseCursor, changes});
+            // creates carry an empty uid (Android contract).
+            #expect(request.httpMethod == "POST")
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
-            #expect(body.contains(#""name":"Ada""#))
-            #expect(body.contains(#""cursor":0"#))
+            #expect(body.contains(#""baseCursor":0"#))
+            #expect(body.contains(#""fn":"Ada""#))
+            #expect(body.contains(#""uid":"""#))
         }
         let env = try makeEnvironment(client: client)
         try await env.repository.saveContact(makeContact(name: "Ada", email: "ada@example.com"))
@@ -229,9 +255,13 @@ private func makeContact(
         #expect(env.cursorStore.lastCursor == 456)
     }
 
-    @Test func serverDeleteRemovesLocalContact() async throws {
-        let json = #"{"delta": [{"uid": "srv-1", "deleted": true}], "cursor": 2}"#
-        let env = try makeEnvironment(client: stubClient(json: json))
+    @Test func serverDeleteRemovesLocalContactViaPull() async throws {
+        let json = #"{"cursor": 2, "changed": [], "deleted": [{"uid": "srv-1", "deleted": true}]}"#
+        let env = try makeEnvironment(client: stubClient(json: json) { request in
+            // Nothing queued locally, so the sync is a pull (GET ...&since=).
+            #expect(request.httpMethod == "GET")
+            #expect(request.url!.absoluteString.contains("since=0"))
+        })
         try await env.dao.upsert(contacts: [makeContact(uid: "srv-1", name: "Old")])
 
         try await env.repository.sync()
@@ -239,7 +269,7 @@ private func makeContact(
     }
 
     @Test func localDeleteOfSyncedContactSendsTombstone() async throws {
-        let client = stubClient(json: #"{"delta": [], "cursor": 3}"#) { request in
+        let client = stubClient(json: #"{"cursor": 3, "changed": [], "deleted": []}"#) { request in
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""uid":"srv-9""#))
             #expect(body.contains(#""deleted":true"#))
@@ -257,7 +287,7 @@ private func makeContact(
     }
 
     @Test func unsyncedLocalDeleteLeavesNoTombstone() async throws {
-        let env = try makeEnvironment(client: stubClient(json: #"{"delta": [], "cursor": 1}"#))
+        let env = try makeEnvironment(client: stubClient(json: #"{"cursor": 1}"#))
         let contact = makeContact(name: "Draft Person", needsSync: true)
         try await env.dao.upsert(contacts: [contact])
 
@@ -267,7 +297,14 @@ private func makeContact(
     }
 
     @Test func serverEditUpdatesExistingContact() async throws {
-        let json = #"{"delta": [{"uid": "srv-1", "name": "Ada L.", "phone": "555"}], "cursor": 9}"#
+        let json = """
+        {
+          "cursor": 9,
+          "changed": [
+            { "uid": "srv-1", "rev": 4, "fn": "Ada L.", "phones": [{ "value": "555" }] }
+          ]
+        }
+        """
         let env = try makeEnvironment(client: stubClient(json: json))
         try await env.dao.upsert(contacts: [
             makeContact(uid: "srv-1", name: "Ada", email: "ada@example.com"),
@@ -278,7 +315,19 @@ private func makeContact(
         #expect(all.count == 1)
         #expect(all.first?.name == "Ada L.")
         #expect(all.first?.phone == "555")
+        #expect(all.first?.rev == 4)
         // Fields absent from the delta keep their local values.
         #expect(all.first?.email == "ada@example.com")
+    }
+
+    @Test func tooOldResetsCursorAndCache() async throws {
+        let env = try makeEnvironment(client: stubClient(json: #"{"cursor": 0, "tooOld": true}"#))
+        env.cursorStore.advance(to: 99)
+        try await env.dao.upsert(contacts: [makeContact(uid: "srv-1", name: "Stale")])
+
+        let summary = try await env.repository.sync()
+        #expect(summary.newCursor == 0)
+        #expect(env.cursorStore.lastCursor == 0)
+        #expect(try await env.dao.listAll().isEmpty)
     }
 }

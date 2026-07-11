@@ -56,11 +56,22 @@ struct InboxView: View {
             }
         }
         .background(theme.bg)
-        .navigationTitle("Inbox")
+        .navigationTitle(viewModel.folderDisplayName)
+        .toolbarTitleMenu {
+            folderPicker
+        }
         .navigationDestination(item: $presentedEmail) { email in
             EmailDetailView(email: email, inboxViewModel: viewModel)
         }
         .toolbar {
+            // Explicit folder button — the title menu's chevron is easy to miss.
+            ToolbarItem(placement: .navigation) {
+                Menu {
+                    folderPicker
+                } label: {
+                    Label("Folder", systemImage: "folder")
+                }
+            }
             ToolbarItem {
                 Button {
                     showCompose = true
@@ -87,11 +98,33 @@ struct InboxView: View {
             await viewModel.load()
             viewModel.startAutoRefresh()
             openPendingMessageIfNeeded()
+            await viewModel.loadSubfolders()
         }
         .onDisappear { viewModel.stopAutoRefresh() }
         .onChange(of: router.pendingMessageId) {
             openPendingMessageIfNeeded()
         }
+    }
+
+    /// Server folder choices, shared by the title menu and the toolbar button.
+    private var folderPicker: some View {
+        Picker("Folder", selection: folderSelection) {
+            Label("Inbox", systemImage: "tray").tag(StandardFolder.inbox)
+            ForEach(viewModel.inboxSubfolders, id: \.name) { sub in
+                Label(StandardFolder.displayName(sub.name), systemImage: "folder")
+                    .tag(sub.name)
+            }
+            Label("Junk", systemImage: "xmark.bin").tag(StandardFolder.junk)
+            Label("Trash", systemImage: "trash").tag(StandardFolder.trash)
+        }
+    }
+
+    /// Folder choice for the menus; switching reloads the list.
+    private var folderSelection: Binding<String> {
+        Binding(
+            get: { viewModel.folder },
+            set: { name in Task { await viewModel.selectFolder(name) } }
+        )
     }
 
     /// Opens the email a notification tap pointed at (spec §3).

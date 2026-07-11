@@ -16,6 +16,8 @@ enum NetworkError: Error, Equatable {
     case unauthorized
     /// 409 — backend rejected the request state (e.g. expired MFA challenge).
     case conflict
+    /// 429 — rate limited (e.g. too many desktop pairing attempts); wait, then retry.
+    case rateLimited
     /// 503 — backend config issue; persistent error, cannot retry (spec §3).
     case serviceUnavailable
     case server(statusCode: Int)
@@ -28,6 +30,7 @@ enum NetworkError: Error, Equatable {
         case 200..<300: nil
         case 401, 403: .unauthorized
         case 409: .conflict
+        case 429: .rateLimited
         case 503: .serviceUnavailable
         default: .server(statusCode: statusCode)
         }
@@ -74,9 +77,13 @@ final class HTTPClient: Sendable {
     func get<Response: Decodable>(
         _ type: Response.Type,
         url: URL,
-        query: [URLQueryItem] = []
+        query: [URLQueryItem] = [],
+        headers: [String: String] = [:]
     ) async throws -> Response {
-        let request = URLRequest(url: try url.appending(queryOrThrow: query))
+        var request = URLRequest(url: try url.appending(queryOrThrow: query))
+        for (field, value) in headers {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
         return try await decode(execute(request))
     }
 
@@ -84,11 +91,15 @@ final class HTTPClient: Sendable {
         _ type: Response.Type,
         url: URL,
         query: [URLQueryItem] = [],
+        headers: [String: String] = [:],
         jsonBody: some Encodable
     ) async throws -> Response {
         var request = URLRequest(url: try url.appending(queryOrThrow: query))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (field, value) in headers {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
         do {
             request.httpBody = try encoder.encode(jsonBody)
         } catch {

@@ -135,6 +135,18 @@ struct RelaySendResponse: Decodable, Sendable {
     var warning: String?
 }
 
+/// Bulk action body (Mobile_Mail_Relay.md /api/inbox/actions).
+struct RelayActionRequest: Encodable, Equatable, Sendable {
+    var action: String
+    var messageIds: [String]
+    var mailbox: String
+    var targetMailbox: String?
+}
+
+struct RelayActionResponse: Decodable, Sendable {
+    var ok: Bool?
+}
+
 /// Send body with comma-joined recipients (Mobile_Mail_Relay.md Part 6) —
 /// differs from contact sync's array-of-objects shape.
 struct RelaySendRequest: Encodable, Equatable, Sendable {
@@ -168,11 +180,15 @@ final class RelayMailSource: MailSource {
         self.auth = auth
     }
 
-    func listFolders() async throws -> [MailFolder] {
+    func listFolders(parent: String?) async throws -> [MailFolder] {
+        var query = auth.queryItems
+        if let parent, !parent.isEmpty {
+            query.append(URLQueryItem(name: "parent", value: parent))
+        }
         let response = try await httpClient.get(
             RelayFolderListResponse.self,
             url: try endpoint("api/inbox/folders"),
-            query: auth.queryItems
+            query: query
         )
         return (response.folders ?? []).map { MailFolder(name: $0.path) }
     }
@@ -196,13 +212,27 @@ final class RelayMailSource: MailSource {
     func search(folder: String, query: String) async throws -> [String] {
         // The relay has no search endpoint (Android searches its local cache);
         // inbox search runs against the EmailDAO cache instead.
-        throw MailSourceError.imapUnsupportedInV1
+        throw MailSourceError.unsupported
     }
 
     func setKeywords(folder: String, messageId: String, keywords: [String]) async throws {
         // Relay tabs are server-assigned; there is no relay endpoint for
         // client-side keyword edits.
-        throw MailSourceError.imapUnsupportedInV1
+        throw MailSourceError.unsupported
+    }
+
+    func move(messageIds: [String], from mailbox: String, to targetMailbox: String) async throws {
+        _ = try await httpClient.post(
+            RelayActionResponse.self,
+            url: try endpoint("api/inbox/actions"),
+            query: auth.queryItems,
+            jsonBody: RelayActionRequest(
+                action: "move",
+                messageIds: messageIds,
+                mailbox: mailbox,
+                targetMailbox: targetMailbox
+            )
+        )
     }
 
     func send(email: OutgoingEmail) async throws {

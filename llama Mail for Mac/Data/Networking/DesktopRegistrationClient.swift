@@ -81,7 +81,9 @@ final class DesktopRegistrationClient: Sendable {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
-    /// e.g. "macOS/arm64".
+    /// e.g. "Yoshi's MacBook Pro (macOS/arm64)" — the user-assigned device
+    /// name leads so the server's paired-device list shows something
+    /// recognizable, with platform/arch kept as a suffix.
     private static var platformInfo: String {
 #if os(macOS)
         let os = "macOS"
@@ -93,6 +95,12 @@ final class DesktopRegistrationClient: Sendable {
         let machine = withUnsafeBytes(of: &systemInfo.machine) { buffer in
             String(decoding: buffer.prefix(while: { $0 != 0 }), as: UTF8.self)
         }
-        return "\(os)/\(machine.isEmpty ? "unknown" : machine)"
+        let platform = "\(os)/\(machine.isEmpty ? "unknown" : machine)"
+#if os(macOS)
+        if let deviceName = Host.current().localizedName, !deviceName.isEmpty {
+            return "\(deviceName) (\(platform))"
+        }
+#endif
+        return platform
     }
 }

@@ -2,11 +2,10 @@
 //  KeywordRepository.swift
 //  llama Mail
 //
-//  Derives inbox tabs from email keywords (spec §2 Inbox Tabs): IMAP mode
-//  computes them from user flags, relay mode from server tab/label fields —
-//  both arrive on Email.keywords, so one computation serves both. Visibility
+//  Derives inbox tabs from email keywords (spec §2 Inbox Tabs): the relay's
+//  server-assigned tab/label fields arrive on Email.keywords. Visibility
 //  toggles come from KeywordSettingsStore. The 90-second foreground refresh
-//  is driven by the inbox view model (Phase 6) on Config.foregroundRefreshInterval.
+//  is driven by the inbox view model on Config.foregroundRefreshInterval.
 //
 
 import Foundation

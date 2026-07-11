@@ -10,7 +10,7 @@ import SwiftData
 
 @Model
 final class EmailEntity {
-    /// IMAP UID or Relay ID.
+    /// Relay message id.
     @Attribute(.unique) var serverId: String
     var folder: String
     var senderName: String

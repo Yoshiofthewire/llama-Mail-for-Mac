@@ -25,16 +25,24 @@ extension PairingParams: Identifiable {
     var id: String { "\(sub)|\(srv)" }
 }
 
+extension DesktopPairingParams: Identifiable {
+    var id: String { code }
+}
+
 @Observable
 @MainActor
 final class NavigationRouter {
     var selectedTab: AppTab = .inbox
     /// Presented pairing flow (from QR / deep link).
     var pairingParams: PairingParams?
+    /// Presented desktop pairing flow (llamalabels://desktop-pair deep link).
+    var desktopPairingParams: DesktopPairingParams?
     /// Presented in-app MFA approval fallback.
     var mfaRoute: MfaRoute?
     /// Message the inbox should open once loaded (from a notification tap).
     var pendingMessageId: String?
+    /// Set by the macOS File → New Email menu command (Cmd+N).
+    var composeRequested = false
 
     private let deepLinkHandler: DeepLinkHandler
 
@@ -46,6 +54,8 @@ final class NavigationRouter {
         switch action {
         case .openPairingFlow(let params):
             pairingParams = params
+        case .openDesktopPairingFlow(let params):
+            desktopPairingParams = params
         case .openEmail(let messageId):
             selectedTab = .inbox
             pendingMessageId = messageId

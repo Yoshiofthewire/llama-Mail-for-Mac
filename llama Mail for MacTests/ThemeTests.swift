@@ -43,6 +43,21 @@ import Testing
         #expect(AppTheme.palette(named: "Ocean").accentSoft == Color(hex: 0x214657))
     }
 
+    @Test func lightThemesGetLightColorScheme() {
+        // Light themes must run the light system appearance so default text
+        // (labels, titles, fields) is dark on their light backgrounds.
+        let lightThemes = ["Light Matter", "Tropics", "White Cliffs", "Sky", "Sun"]
+        for name in AppTheme.themeNames {
+            let palette = AppTheme.palette(named: name)
+            let expected = lightThemes.contains(name)
+            #expect(
+                palette.isLight == expected,
+                "\(name) should be \(expected ? "light" : "dark")"
+            )
+            #expect(palette.preferredColorScheme == (expected ? .light : .dark))
+        }
+    }
+
     @Test func readableOnAccentContrast() {
         #expect(Color(hex: 0xFFFFFF).isPerceptuallyLight)
         #expect(!Color(hex: 0x000000).isPerceptuallyLight)
@@ -82,8 +97,6 @@ import Testing
     private func makeViewModel(client: HTTPClient) throws -> InboxViewModel {
         let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
         let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-        let settingsStore = MailSettingsStore(defaults: defaults, keychain: keychain)
-        settingsStore.connectionMode = .relay
         let pairingStore = SecurePairingStore(keychain: keychain)
         try pairingStore.savePairing(Pairing(
             sub: "u", hash: "h", srv: "https://relay.example.com",
@@ -91,7 +104,6 @@ import Testing
         ))
         let db = try AppDatabase(inMemory: true)
         let mailRepository = MailRepository(
-            mailSettingsStore: settingsStore,
             securePairingStore: pairingStore,
             emailDAO: EmailDAO(modelContainer: db.container),
             httpClient: client
@@ -107,11 +119,11 @@ import Testing
     @Test @MainActor func loadBuildsTabsAndFiltersBySelection() async throws {
         let json = """
         {
-          "emails": [
-            { "id": "1", "subject": "Work thing", "tab": "Work" },
-            { "id": "2", "subject": "Urgent thing", "tab": "Important" },
-            { "id": "3", "subject": "Untagged thing" }
-          ]
+          "byTab": {
+            "Work": [{ "messageId": "1", "subject": "Work thing" }],
+            "Important": [{ "messageId": "2", "subject": "Urgent thing" }],
+            "": [{ "messageId": "3", "subject": "Untagged thing" }]
+          }
         }
         """
         let client = HTTPClient { request in
@@ -136,12 +148,9 @@ import Testing
     @Test @MainActor func notPairedProducesFriendlyError() async throws {
         let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
         let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-        let settingsStore = MailSettingsStore(defaults: defaults, keychain: keychain)
-        settingsStore.connectionMode = .relay
         let db = try AppDatabase(inMemory: true)
         let viewModel = InboxViewModel(
             mailRepository: MailRepository(
-                mailSettingsStore: settingsStore,
                 securePairingStore: SecurePairingStore(keychain: keychain),
                 emailDAO: EmailDAO(modelContainer: db.container),
                 httpClient: HTTPClient { _ in throw URLError(.badURL) }

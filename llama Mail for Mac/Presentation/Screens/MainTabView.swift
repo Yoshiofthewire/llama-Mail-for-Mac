@@ -12,13 +12,8 @@ struct MainTabView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(NavigationRouter.self) private var router
 
-    @State private var inboxViewModel = InboxViewModel(
-        mailRepository: SingletonGraph.shared.mailRepository,
-        keywordRepository: SingletonGraph.shared.keywordRepository
-    )
-    @State private var contactsViewModel = ContactsViewModel(
-        repository: SingletonGraph.shared.contactSyncRepository
-    )
+    private var inboxViewModel: InboxViewModel { SingletonGraph.shared.inboxViewModel }
+    private var contactsViewModel: ContactsViewModel { SingletonGraph.shared.contactsViewModel }
 
     var body: some View {
         @Bindable var router = router
@@ -45,6 +40,10 @@ struct MainTabView: View {
         .environment(\.theme, themeManager.palette)
         .sheet(item: $router.pairingParams) { params in
             PushPairingView(initialParams: params)
+                .environment(\.theme, themeManager.palette)
+        }
+        .sheet(item: $router.desktopPairingParams) { params in
+            DesktopPairingView(initialParams: params)
                 .environment(\.theme, themeManager.palette)
         }
         .sheet(item: $router.mfaRoute) { route in

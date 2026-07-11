@@ -216,6 +216,12 @@ private let validPairingLink = URL(
             #expect(url.contains("sub=u1"))
             #expect(url.contains("hash=h1"))
             #expect(request.httpMethod == "POST")
+            // Body fields are a binding contract with the live backend:
+            // subscriberId, pairingToken, and deviceToken are required.
+            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
+            #expect(body.contains(#""subscriberId":"u1""#))
+            #expect(body.contains(#""pairingToken":"p1""#))
+            #expect(body.contains(#""deviceToken":"apns-token""#))
         }
         let outcome = await NativeRegistrationClient(httpClient: client)
             .register(deviceToken: "apns-token", params: params)
@@ -287,27 +293,47 @@ private let validPairingLink = URL(
 }
 
 @Suite struct ContactSyncClientTests {
-    @Test func syncSendsDeltaAndDecodesResponse() async throws {
+    @Test func pullSendsSinceAndDecodesResponse() async throws {
         let client = stubClient(
             status: 200,
-            json: #"{"delta": [{"uid": "srv-1", "name": "Ada"}], "cursor": 456}"#
+            json: #"{"cursor": 456, "changed": [{"uid": "srv-1", "rev": 2, "fn": "Ada"}], "deleted": []}"#
         ) { request in
-            #expect(
-                request.url!.absoluteString
-                    .hasPrefix("https://relay.example.com/api/contacts/sync")
-            )
-            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
-            #expect(body.contains("\"cursor\":123"))
+            let url = request.url!.absoluteString
+            #expect(url.hasPrefix("https://relay.example.com/api/contacts/sync"))
+            #expect(url.contains("since=123"))
+            #expect(request.httpMethod == "GET")
         }
-        let response = try await ContactSyncClient(httpClient: client).sync(
+        let response = try await ContactSyncClient(httpClient: client).pull(
             serverUrl: "https://relay.example.com",
             auth: RelayAuth(sub: "u", hash: "h"),
-            request: ContactSyncRequest(
-                delta: [ContactDeltaDTO(name: "Ada", email: "ada@example.com")],
-                cursor: 123
-            )
+            since: 123
         )
         #expect(response.cursor == 456)
-        #expect(response.delta.first?.uid == "srv-1")
+        #expect(response.changed?.first?.uid == "srv-1")
+        #expect(response.changed?.first?.fn == "Ada")
+    }
+
+    @Test func pushSendsBaseCursorAndChanges() async throws {
+        let client = stubClient(status: 200, json: #"{"cursor": 7}"#) { request in
+            #expect(request.httpMethod == "POST")
+            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
+            #expect(body.contains(#""baseCursor":123"#))
+            #expect(body.contains(#""fn":"Ada""#))
+            #expect(body.contains(#""value":"ada@example.com""#))
+        }
+        let response = try await ContactSyncClient(httpClient: client).push(
+            serverUrl: "https://relay.example.com",
+            auth: RelayAuth(sub: "u", hash: "h"),
+            baseCursor: 123,
+            changes: [ContactDTO(
+                uid: "",
+                rev: 0,
+                deleted: nil,
+                fn: "Ada",
+                emails: [ContactFieldDTO(label: nil, value: "ada@example.com")],
+                phones: []
+            )]
+        )
+        #expect(response.cursor == 7)
     }
 }

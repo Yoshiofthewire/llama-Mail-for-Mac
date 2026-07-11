@@ -63,105 +63,137 @@ private func makeOutgoing(
         #expect(request.to == "a@x.com, b@x.com")
         #expect(request.cc == "c@x.com")
         #expect(request.bcc == "")
+        #expect(request.mode == "plain")
 
-        // Binding contract (spec §7): strings in the JSON, not arrays.
+        // Binding contract (Mobile_Mail_Relay.md Part 6): strings in the
+        // JSON, not arrays, plus a "mode" field.
         let data = try JSONEncoder().encode(request)
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["to"] as? String == "a@x.com, b@x.com")
         #expect(object["cc"] as? String == "c@x.com")
+        #expect(object["mode"] as? String == "plain")
     }
 }
 
 // MARK: - RelayMailSource
 
 @Suite struct RelayMailSourceTests {
-    @Test func fetchEmailsMapsTabAndLabelToKeywords() async throws {
+    @Test func fetchEmailsMapsByTabResponse() async throws {
+        // Shape from Mobile_Mail_Relay.md / Android RelayModels.kt.
         let json = """
         {
-          "emails": [
-            {
-              "id": "e-1",
-              "senderName": "Ada",
-              "senderEmail": "ada@example.com",
-              "subject": "Report",
-              "body": "The report",
-              "tab": "Work",
-              "label": "Important",
-              "receivedAt": 1750000000,
-              "read": true,
-              "starred": false
-            },
-            { "id": "e-2", "subject": "Bare minimum" }
-          ]
+          "tabs": ["Work", "Personal"],
+          "byTab": {
+            "Work": [
+              {
+                "messageId": "e-1",
+                "sender": "Ada Lovelace <ada@example.com>",
+                "subject": "Report",
+                "body": "The report",
+                "label": "Important",
+                "status": "read",
+                "atUtc": "2025-06-15T15:06:40Z"
+              }
+            ],
+            "Personal": [
+              { "messageId": "e-2", "subject": "Bare minimum" }
+            ]
+          },
+          "cursor": 1750000000,
+          "delta": false,
+          "removed": []
         }
         """
         let client = stubClient(json: json) { request in
             let url = request.url!.absoluteString
-            #expect(url.hasPrefix("\(server)/api/relay/folder?"))
+            #expect(url.hasPrefix("\(server)/api/inbox?"))
             #expect(url.contains("sub=u1"))
             #expect(url.contains("hash=h1"))
-            #expect(url.contains("folder=INBOX"))
-            #expect(url.contains("from=0"))
-            #expect(url.contains("to=50"))
+            #expect(url.contains("mailbox=INBOX"))
+            #expect(url.contains("limit=50"))
+            #expect(url.contains("since=0"))
         }
         let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
         let emails = try await source.fetchEmails(folder: "INBOX", from: 0, to: 50)
 
         #expect(emails.count == 2)
         let full = try #require(emails.first { $0.serverId == "e-1" })
-        #expect(full.keywords == ["Work", "Important"])
-        #expect(full.read)
+        #expect(full.senderName == "Ada Lovelace")
+        #expect(full.senderEmail == "ada@example.com")
+        #expect(full.keywords == ["Important"]) // label wins over tab
+        #expect(full.read) // any status but "unread"
         #expect(full.receivedAt == Date(timeIntervalSince1970: 1_750_000_000))
 
         let bare = try #require(emails.first { $0.serverId == "e-2" })
-        #expect(bare.keywords.isEmpty)
-        #expect(!bare.read)
+        #expect(bare.keywords == ["Personal"]) // falls back to its tab
+        #expect(!bare.read) // status defaults to unread
     }
 
-    @Test func listFoldersAndSearch() async throws {
-        let foldersClient = stubClient(json: #"{"folders": ["INBOX", "Archive"]}"#) { request in
-            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/relay/folders?"))
+    @Test func numericCursorDecodes() throws {
+        // Some deployments emit cursor as a bare number, others as a string.
+        let numeric = try JSONDecoder().decode(
+            RelayInboxResponse.self,
+            from: Data(#"{"cursor": 42}"#.utf8)
+        )
+        #expect(numeric.cursor == FlexibleCursor("42"))
+        let string = try JSONDecoder().decode(
+            RelayInboxResponse.self,
+            from: Data(#"{"cursor": "42"}"#.utf8)
+        )
+        #expect(string.cursor == FlexibleCursor("42"))
+    }
+
+    @Test func listFoldersMapsPathAndSearchIsLocalOnly() async throws {
+        let json = #"{"parent": "", "folders": [{"path": "INBOX"}, {"path": "Archive", "deletable": true}]}"#
+        let foldersClient = stubClient(json: json) { request in
+            let url = request.url!.absoluteString
+            #expect(url.hasPrefix("\(server)/api/inbox/folders?"))
+            #expect(!url.contains("parent="))
         }
         let folders = try await RelayMailSource(httpClient: foldersClient, serverUrl: server, auth: auth)
             .listFolders()
         #expect(folders.map(\.name) == ["INBOX", "Archive"])
 
-        let searchClient = stubClient(json: #"{"ids": ["e-1", "e-9"]}"#) { request in
-            let url = request.url!.absoluteString
-            #expect(url.hasPrefix("\(server)/api/relay/search?"))
-            #expect(url.contains("query=report"))
+        // Subfolder listing scopes the request with the parent param.
+        let subJson = #"{"parent": "Archive", "folders": [{"path": "Archive/Receipts", "deletable": true}]}"#
+        let subClient = stubClient(json: subJson) { request in
+            #expect(request.url!.absoluteString.contains("parent=Archive"))
         }
-        let ids = try await RelayMailSource(httpClient: searchClient, serverUrl: server, auth: auth)
-            .search(folder: "INBOX", query: "report")
-        #expect(ids == ["e-1", "e-9"])
+        let subs = try await RelayMailSource(httpClient: subClient, serverUrl: server, auth: auth)
+            .listFolders(parent: "Archive")
+        #expect(subs.map(\.name) == ["Archive/Receipts"])
+
+        // The relay has no search endpoint; inbox search uses the local cache.
+        await #expect(throws: MailSourceError.unsupported) {
+            _ = try await RelayMailSource(httpClient: stubClient(), serverUrl: server, auth: auth)
+                .search(folder: "INBOX", query: "report")
+        }
+    }
+
+    @Test func movePostsBulkActionBody() async throws {
+        let client = stubClient(json: #"{"ok": true}"#) { request in
+            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/inbox/actions?"))
+            #expect(request.httpMethod == "POST")
+            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
+            #expect(body.contains(#""action":"move""#))
+            #expect(body.contains(#""messageIds":["e-1","e-2"]"#))
+            #expect(body.contains(#""mailbox":"INBOX""#))
+            #expect(body.contains(#""targetMailbox":"Archive\/2026""#))
+        }
+        let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
+        try await source.move(messageIds: ["e-1", "e-2"], from: "INBOX", to: "Archive/2026")
     }
 
     @Test func sendPostsCommaStringBody() async throws {
-        let client = stubClient(json: #"{"ok": true}"#) { request in
-            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/relay/send?"))
+        let client = stubClient(json: #"{"ok": true, "sentSaved": true}"#) { request in
+            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/mail/send?"))
             #expect(request.httpMethod == "POST")
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""to":"a@x.com, b@x.com""#))
+            #expect(body.contains(#""mode":"plain""#))
         }
         let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
         try await source.send(email: makeOutgoing())
-    }
-}
-
-// MARK: - IMAP stub
-
-@Suite struct ImapMailSourceTests {
-    @Test func allOperationsAreUnsupportedInV1() async {
-        let source = ImapMailSource()
-        await #expect(throws: MailSourceError.imapUnsupportedInV1) {
-            _ = try await source.listFolders()
-        }
-        await #expect(throws: MailSourceError.imapUnsupportedInV1) {
-            _ = try await source.fetchEmails(folder: "INBOX", from: 0, to: 10)
-        }
-        await #expect(throws: MailSourceError.imapUnsupportedInV1) {
-            try await source.send(email: makeOutgoing())
-        }
     }
 }
 
@@ -171,10 +203,9 @@ private func makeOutgoing(
     @Test func errorMapping() {
         #expect(MailOutcome.from(NetworkError.unauthorized) == .unauthorized)
         #expect(MailOutcome.from(MailSourceError.notPaired) == .notPaired)
-        #expect(
-            MailOutcome.from(MailSourceError.imapUnsupportedInV1)
-            == .failure("Manual IMAP is not supported yet")
-        )
+        if case .failure = MailOutcome.from(MailSourceError.unsupported) {} else {
+            Issue.record("unsupported should map to failure")
+        }
         if case .failure = MailOutcome.from(NetworkError.serviceUnavailable) {} else {
             Issue.record("503 should map to failure")
         }
@@ -217,14 +248,9 @@ private func makeOutgoing(
 @Suite struct MailRepositoryTests {
     private func makeRepository(
         client: HTTPClient,
-        mode: MailConnectionMode,
         paired: Bool
     ) throws -> MailRepository {
-        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
         let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-        let settingsStore = MailSettingsStore(defaults: defaults, keychain: keychain)
-        settingsStore.connectionMode = mode
-
         let pairingStore = SecurePairingStore(keychain: keychain)
         if paired {
             try pairingStore.savePairing(Pairing(
@@ -239,23 +265,22 @@ private func makeOutgoing(
         }
         let db = try AppDatabase(inMemory: true)
         return MailRepository(
-            mailSettingsStore: settingsStore,
             securePairingStore: pairingStore,
             emailDAO: EmailDAO(modelContainer: db.container),
             httpClient: client
         )
     }
 
-    @Test func relayModeWithoutPairingIsNotPaired() throws {
-        let repository = try makeRepository(client: stubClient(), mode: .relay, paired: false)
+    @Test func withoutPairingIsNotPaired() throws {
+        let repository = try makeRepository(client: stubClient(), paired: false)
         #expect(throws: MailSourceError.notPaired) {
             _ = try repository.makeSource()
         }
     }
 
     @Test func refreshFolderCachesSnapshot() async throws {
-        let json = #"{"emails": [{"id": "e-1", "subject": "Cached", "tab": "Work"}]}"#
-        let repository = try makeRepository(client: stubClient(json: json), mode: .relay, paired: true)
+        let json = #"{"byTab": {"Work": [{"messageId": "e-1", "subject": "Cached"}]}}"#
+        let repository = try makeRepository(client: stubClient(json: json), paired: true)
 
         let fetched = try await repository.refreshFolder("INBOX")
         #expect(fetched.count == 1)
@@ -265,10 +290,10 @@ private func makeOutgoing(
         #expect(cached.first?.subject == "Cached")
     }
 
-    @Test func manualImapSendFailsInV1() async throws {
-        let repository = try makeRepository(client: stubClient(), mode: .manualImap, paired: false)
+    @Test func sendWithoutPairingIsNotPaired() async throws {
+        let repository = try makeRepository(client: stubClient(), paired: false)
         let outcome = await repository.send(makeOutgoing())
-        #expect(outcome == .failure("Manual IMAP is not supported yet"))
+        #expect(outcome == .notPaired)
     }
 }
 
@@ -276,10 +301,7 @@ private func makeOutgoing(
 
 @Suite struct SendEmailUseCaseTests {
     private func makeUseCase(client: HTTPClient) throws -> SendEmailUseCase {
-        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
         let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-        let settingsStore = MailSettingsStore(defaults: defaults, keychain: keychain)
-        settingsStore.connectionMode = .relay
         let pairingStore = SecurePairingStore(keychain: keychain)
         try pairingStore.savePairing(Pairing(
             sub: "u1", hash: "h1", srv: server, registrationUrl: nil,
@@ -287,7 +309,6 @@ private func makeOutgoing(
         ))
         let db = try AppDatabase(inMemory: true)
         return SendEmailUseCase(repository: MailRepository(
-            mailSettingsStore: settingsStore,
             securePairingStore: pairingStore,
             emailDAO: EmailDAO(modelContainer: db.container),
             httpClient: client

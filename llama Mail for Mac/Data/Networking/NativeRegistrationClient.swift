@@ -42,11 +42,13 @@ enum RegistrationOutcome: Equatable, Sendable {
 
 final class NativeRegistrationClient: Sendable {
     private struct RegisterRequest: Encodable {
-        // ponytail: request body shape is not in the spec — {token, platform}
-        // assumed; align with the backend contract before release.
-        var token: String
-        var platform: String
+        // Binding contract (verified against the live backend 2026-07-10):
+        // subscriberId, pairingToken, and deviceToken are required in the
+        // body; anything else returns 400.
+        var subscriberId: String
         var pairingToken: String
+        var deviceToken: String
+        var platform: String
     }
 
     private let httpClient: HTTPClient
@@ -72,9 +74,10 @@ final class NativeRegistrationClient: Sendable {
                 url: endpoint,
                 query: params.auth.queryItems,
                 jsonBody: RegisterRequest(
-                    token: deviceToken,
-                    platform: platform,
-                    pairingToken: params.pt
+                    subscriberId: params.sub,
+                    pairingToken: params.pt,
+                    deviceToken: deviceToken,
+                    platform: platform
                 )
             )
             return .success(response)

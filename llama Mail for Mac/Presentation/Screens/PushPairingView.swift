@@ -2,8 +2,9 @@
 //  PushPairingView.swift
 //  llama Mail
 //
-//  Pairing flow (spec §1). Auto-pairs when opened from a deep link; offers a
-//  paste-the-link fallback otherwise. ponytail: camera QR scanning is v2.
+//  Pairing flow (spec §1). Auto-pairs when opened from a deep link. On iOS
+//  the default entry point is camera QR scanning, with a paste-the-link
+//  fallback; macOS pairs via deep link or paste.
 //
 
 import SwiftUI
@@ -19,6 +20,10 @@ struct PushPairingView: View {
         registrationService: SingletonGraph.shared.deviceRegistrationService,
         pushSettingsStore: SingletonGraph.shared.pushSettingsStore
     )
+#if os(iOS)
+    /// nil until the camera permission request resolves.
+    @State private var cameraAccessGranted: Bool?
+#endif
 
     var body: some View {
         NavigationStack {
@@ -56,7 +61,7 @@ struct PushPairingView: View {
                             .font(AppFont.ui(14))
                             .foregroundStyle(theme.ink)
                             .multilineTextAlignment(.center)
-                        Button("Try Again") { viewModel.pastedLink = "" }
+                        Button("Try Again") { viewModel.reset() }
                             .buttonStyle(SecondaryButtonStyle())
                     }
                     .frame(maxHeight: .infinity)
@@ -85,6 +90,9 @@ struct PushPairingView: View {
 
     private var idleContent: some View {
         VStack(spacing: 16) {
+#if os(iOS)
+            scannerContent
+#else
             Image(systemName: "qrcode.viewfinder")
                 .font(.system(size: 44))
                 .foregroundStyle(theme.accent)
@@ -92,6 +100,7 @@ struct PushPairingView: View {
                 .font(AppFont.ui(14))
                 .foregroundStyle(theme.ink)
                 .multilineTextAlignment(.center)
+#endif
 
             TextField("llamalabels://native-pair?…", text: $viewModel.pastedLink)
                 .font(AppFont.mono(13))
@@ -111,4 +120,46 @@ struct PushPairingView: View {
         }
         .frame(maxHeight: .infinity)
     }
+
+#if os(iOS)
+    /// Default iOS entry point: scan the pairing QR code from the web app.
+    @ViewBuilder
+    private var scannerContent: some View {
+        if QRScannerView.isSupported && cameraAccessGranted != false {
+            Group {
+                if cameraAccessGranted == true {
+                    QRScannerView { payload in
+                        Task { await viewModel.pairFromScannedCode(payload) }
+                    }
+                } else {
+                    ProgressView()
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 320)
+            .clipShape(RoundedRectangle(cornerRadius: Shape.field))
+            .overlay(
+                RoundedRectangle(cornerRadius: Shape.field)
+                    .strokeBorder(theme.line, lineWidth: 1)
+            )
+            .task {
+                if cameraAccessGranted == nil {
+                    cameraAccessGranted = await QRScannerView.requestCameraAccess()
+                }
+            }
+            Text("Point the camera at the pairing QR code from the web app, or paste the link below.")
+                .font(AppFont.ui(14))
+                .foregroundStyle(theme.ink)
+                .multilineTextAlignment(.center)
+        } else {
+            Image(systemName: "qrcode.viewfinder")
+                .font(.system(size: 44))
+                .foregroundStyle(theme.accent)
+            Text("Camera unavailable — paste the pairing link below instead.")
+                .font(AppFont.ui(14))
+                .foregroundStyle(theme.ink)
+                .multilineTextAlignment(.center)
+        }
+    }
+#endif
 }

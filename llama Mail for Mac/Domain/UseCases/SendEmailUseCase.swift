@@ -31,7 +31,7 @@ struct SendEmailUseCase {
     /// Minimal shape check (one @, non-empty local part, dot in domain) —
     /// real validation is the mail server's job.
     static func looksLikeEmailAddress(_ address: String) -> Bool {
-        let parts = address.split(separator: "@")
+        let parts = address.split(separator: "@", omittingEmptySubsequences: false)
         guard parts.count == 2 else { return false }
         return !parts[0].isEmpty && parts[1].contains(".") && !parts[1].hasSuffix(".")
     }

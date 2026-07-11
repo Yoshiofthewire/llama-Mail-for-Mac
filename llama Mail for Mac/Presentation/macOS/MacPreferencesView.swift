@@ -38,6 +38,7 @@ struct MacPreferencesView: View {
         .frame(width: 560, height: 460)
         .tint(themeManager.palette.accent)
         .environment(\.theme, themeManager.palette)
+        .preferredColorScheme(themeManager.palette.preferredColorScheme)
     }
 }
 

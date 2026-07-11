@@ -1,6 +1,6 @@
 # llama Mail for Mac
 
-A native SwiftUI mail client for macOS and iOS that connects to a [llama-labels](https://github.com/urlxl) mail relay. It is a port of the Android reference app (`llama-mobile`), sharing the same wire contracts, theme palettes, and pairing flows.
+A native SwiftUI mail client for macOS and iOS that connects to a llama-labels mail relay. It is a port of the Android reference app (`llama-mobile`), sharing the same wire contracts, theme palettes, and pairing flows.
 
 The app talks only to the relay backend — there is no direct IMAP/SMTP. You pair a device once (QR code or deep link) and the relay handles mail access, server-side keyword tabs, push notifications, and contact sync.
 

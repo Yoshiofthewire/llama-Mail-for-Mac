@@ -26,11 +26,40 @@ struct LlamaApp: App {
     private var graph: SingletonGraph { .shared }
 
     var body: some Scene {
+#if os(macOS)
+        mainWindow
+            .commands {
+                LlamaCommands(router: router)
+            }
+
+        // Pop-out reader: one window per email, keyed by relay server id.
+        WindowGroup("Email", id: "email", for: String.self) { $serverId in
+            EmailWindowView(serverId: serverId ?? "")
+                .environment(themeManager)
+                .environment(router)
+                .environment(\.theme, themeManager.palette)
+                .preferredColorScheme(themeManager.palette.preferredColorScheme)
+                .background(themeManager.palette.bg.ignoresSafeArea())
+        }
+        .defaultSize(width: 680, height: 620)
+
+        Settings {
+            MacPreferencesView()
+                .environment(themeManager)
+                .environment(router)
+        }
+#else
+        mainWindow
+#endif
+    }
+
+    private var mainWindow: some Scene {
         WindowGroup {
             rootView
                 .environment(themeManager)
                 .environment(router)
                 .environment(\.theme, themeManager.palette)
+                .preferredColorScheme(themeManager.palette.preferredColorScheme)
                 .background(themeManager.palette.bg.ignoresSafeArea())
                 .onOpenURL { url in
                     router.handleURL(url)
@@ -43,17 +72,6 @@ struct LlamaApp: App {
                 }
         }
         .modelContainer(graph.database.container)
-#if os(macOS)
-        .commands {
-            LlamaCommands(router: router)
-        }
-
-        Settings {
-            MacPreferencesView()
-                .environment(themeManager)
-                .environment(router)
-        }
-#endif
     }
 
     @ViewBuilder

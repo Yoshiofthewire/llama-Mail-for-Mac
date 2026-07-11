@@ -61,4 +61,20 @@ final class PushPairingViewModel {
         }
         await pair(params: params)
     }
+
+    /// Pairs from a scanned QR code containing a llamalabels://native-pair link.
+    func pairFromScannedCode(_ payload: String) async {
+        guard let url = URL(string: payload.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let params = try? PairingLinkParser.parse(url) else {
+            state = .failed("That QR code isn't a llama Mail pairing code.")
+            return
+        }
+        await pair(params: params)
+    }
+
+    /// Back to the scan/paste screen after a failure.
+    func reset() {
+        pastedLink = ""
+        state = .idle
+    }
 }

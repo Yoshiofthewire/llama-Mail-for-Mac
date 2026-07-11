@@ -27,6 +27,12 @@ final class ContactCursorStore {
         guard cursor > lastCursor else { return }
         defaults.set(cursor, forKey: Self.key)
     }
+
+    /// Discards the cursor after a `tooOld` response so the next sync is a
+    /// full re-pull from 0 (Mobile_Contact_Sync.md).
+    func reset() {
+        defaults.removeObject(forKey: Self.key)
+    }
 }
 
 /// Uids of contacts deleted locally while unsynced; included as

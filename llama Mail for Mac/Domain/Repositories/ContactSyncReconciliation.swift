@@ -15,23 +15,26 @@ enum ContactSyncReconciliation {
         var uid: String
     }
 
-    /// Matches locally-created contacts (`uid == nil`) against response delta
+    /// Matches locally-created contacts (`uid == nil`) against `changed`
     /// entries that carry a server uid.
     ///
-    /// Pass 1 pairs entries whose name and email both match; pass 2 pairs the
-    /// remaining contacts and entries in order. Each response entry is used at
-    /// most once; unmatched local contacts stay pending for the next sync.
+    /// Pass 1 pairs entries whose name and primary email both match; pass 2
+    /// pairs the remaining contacts and entries in order. Each response entry
+    /// is used at most once; unmatched local contacts stay pending for the
+    /// next sync.
     static func reconcile(
         localPending: [Contact],
-        responseDelta: [ContactDeltaDTO]
+        responseChanged: [ContactDTO]
     ) -> [Assignment] {
-        var candidates = responseDelta.filter { $0.uid != nil && $0.deleted != true }
+        var candidates = responseChanged.filter {
+            $0.uid?.isEmpty == false && $0.deleted != true
+        }
         var unmatchedLocal: [Contact] = []
         var assignments: [Assignment] = []
 
         for contact in localPending where contact.uid == nil {
             if let index = candidates.firstIndex(where: {
-                $0.name == contact.name && $0.email == contact.email
+                $0.fn == contact.name && $0.primaryEmail == contact.email
             }) {
                 assignments.append(Assignment(localId: contact.localId, uid: candidates[index].uid!))
                 candidates.remove(at: index)

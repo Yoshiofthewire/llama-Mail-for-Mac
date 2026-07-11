@@ -25,6 +25,17 @@ struct ThemePalette: Equatable, Sendable {
         accent.isPerceptuallyLight ? Color(hex: 0x1A1A1E) : .white
     }
 
+    /// Light themes must run the light system appearance (and vice versa) so
+    /// default text, form, and toolbar colors stay readable on the theme's
+    /// backgrounds.
+    var isLight: Bool {
+        bg.isPerceptuallyLight
+    }
+
+    var preferredColorScheme: ColorScheme {
+        isLight ? .light : .dark
+    }
+
     init(
         bg: UInt32, panel: UInt32, ink: UInt32, inkStrong: UInt32,
         accent: UInt32, accentSoft: UInt32, line: UInt32

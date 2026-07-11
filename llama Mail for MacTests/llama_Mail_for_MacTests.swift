@@ -43,40 +43,6 @@ private func makeEmail(
     )
 }
 
-// MARK: - MailSettingsStore
-
-@Suite struct MailSettingsStoreTests {
-    @Test func defaultConnectionModeIsManualImap() {
-        let store = MailSettingsStore(defaults: scratchDefaults(), keychain: scratchKeychain())
-        #expect(store.connectionMode == .manualImap)
-        #expect(store.settings.imapPort == 993)
-        #expect(store.settings.smtpPort == 587)
-        #expect(store.settings.imapFolder == "INBOX")
-    }
-
-    @Test func connectionModeRoundTrip() {
-        let store = MailSettingsStore(defaults: scratchDefaults(), keychain: scratchKeychain())
-        store.connectionMode = .relay
-        #expect(store.connectionMode == .relay)
-        #expect(store.connectionMode.rawValue == "relay")
-        store.connectionMode = .manualImap
-        #expect(store.connectionMode.rawValue == "manual_imap")
-    }
-
-    @Test func settingsRoundTripExcludesPassword() {
-        let defaults = scratchDefaults()
-        let store = MailSettingsStore(defaults: defaults, keychain: scratchKeychain())
-        var settings = MailSettings()
-        settings.imapHost = "imap.example.com"
-        settings.username = "yoshi@urlxl.com"
-        store.settings = settings
-        #expect(store.settings == settings)
-        // Password must never appear in UserDefaults.
-        let allValues = defaults.dictionaryRepresentation().values.compactMap { $0 as? String }
-        #expect(!allValues.contains("hunter2"))
-    }
-}
-
 // MARK: - KeywordSettingsStore
 
 @Suite struct KeywordSettingsStoreTests {

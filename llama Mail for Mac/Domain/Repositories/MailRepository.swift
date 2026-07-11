@@ -35,8 +35,8 @@ final class MailRepository {
         )
     }
 
-    func listFolders() async throws -> [MailFolder] {
-        try await makeSource().listFolders()
+    func listFolders(parent: String? = nil) async throws -> [MailFolder] {
+        try await makeSource().listFolders(parent: parent)
     }
 
     /// Fetches a folder from the server and replaces the cached snapshot.
@@ -55,6 +55,11 @@ final class MailRepository {
     /// Search runs against the local cache (the relay has no search endpoint).
     func search(folder: String, query: String) async throws -> [Email] {
         try await emailDAO.search(folder: folder, query: query)
+    }
+
+    /// Moves messages between folders via the relay's bulk-actions endpoint.
+    func move(messageIds: [String], from mailbox: String, to targetMailbox: String) async throws {
+        try await makeSource().move(messageIds: messageIds, from: mailbox, to: targetMailbox)
     }
 
     func markRead(serverId: String, read: Bool = true) async throws {

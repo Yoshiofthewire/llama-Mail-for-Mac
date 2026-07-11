@@ -27,15 +27,89 @@ final class SingletonGraph {
     // MARK: - Storage
 
     let securePairingStore: SecurePairingStore
-    let mailSettingsStore: MailSettingsStore
     let keywordSettingsStore: KeywordSettingsStore
     let notificationCursorStore: NotificationCursorStore
+    let contactCursorStore: ContactCursorStore
+    let contactPendingDeletesStore: ContactPendingDeletesStore
+    let pushSettingsStore: PushSettingsStore
+    let desktopSessionStore: DesktopSessionStore
 
     // MARK: - DAOs
 
     lazy var emailDAO = EmailDAO(modelContainer: database.container)
     lazy var contactDAO = ContactDAO(modelContainer: database.container)
     lazy var pushNotificationDAO = PushNotificationDAO(modelContainer: database.container)
+
+    // MARK: - Networking
+
+    lazy var httpClient = HTTPClient()
+    lazy var nativeRegistrationClient = NativeRegistrationClient(httpClient: httpClient)
+    lazy var desktopRegistrationClient = DesktopRegistrationClient(httpClient: httpClient)
+    lazy var pushNotificationClient = PushNotificationClient(httpClient: httpClient)
+    lazy var mfaResponseClient = MfaResponseClient(httpClient: httpClient)
+    lazy var contactSyncClient = ContactSyncClient(httpClient: httpClient)
+
+    // MARK: - Repositories & Use Cases
+
+    lazy var mailRepository = MailRepository(
+        securePairingStore: securePairingStore,
+        emailDAO: emailDAO,
+        httpClient: httpClient
+    )
+    lazy var keywordRepository = KeywordRepository(settingsStore: keywordSettingsStore)
+    lazy var sendEmailUseCase = SendEmailUseCase(repository: mailRepository)
+    lazy var contactSyncRepository = ContactSyncRepository(
+        client: contactSyncClient,
+        contactDAO: contactDAO,
+        cursorStore: contactCursorStore,
+        pendingDeletesStore: contactPendingDeletesStore,
+        securePairingStore: securePairingStore
+    )
+    lazy var pushRepository = PushRepository(
+        dao: pushNotificationDAO,
+        cursorStore: notificationCursorStore,
+        client: pushNotificationClient,
+        securePairingStore: securePairingStore,
+        pushSettingsStore: pushSettingsStore
+    )
+    lazy var approveMfaChallengeUseCase = ApproveMfaChallengeUseCase(
+        client: mfaResponseClient,
+        securePairingStore: securePairingStore
+    )
+    lazy var deviceRegistrationService = DeviceRegistrationService(
+        client: nativeRegistrationClient,
+        securePairingStore: securePairingStore,
+        pushSettingsStore: pushSettingsStore
+    )
+    lazy var desktopPairingService = DesktopPairingService(
+        client: desktopRegistrationClient,
+        sessionStore: desktopSessionStore
+    )
+
+    // MARK: - Notifications
+
+    lazy var pushNotificationDispatcher = PushNotificationDispatcher(
+        pushRepository: pushRepository,
+        approveMfaChallenge: approveMfaChallengeUseCase,
+        pushSettingsStore: pushSettingsStore
+    )
+    lazy var pullPollingScheduler = PullPollingScheduler(
+        pushRepository: pushRepository,
+        pushSettingsStore: pushSettingsStore,
+        dispatcher: pushNotificationDispatcher
+    )
+
+    // MARK: - View Models (shared so menu commands and views stay in sync)
+
+    lazy var inboxViewModel = InboxViewModel(
+        mailRepository: mailRepository,
+        keywordRepository: keywordRepository
+    )
+    lazy var contactsViewModel = ContactsViewModel(repository: contactSyncRepository)
+
+    // MARK: - Navigation
+
+    let deepLinkHandler = DeepLinkHandler()
 
     init(
         userDefaults: UserDefaults = .standard,
@@ -45,8 +119,11 @@ final class SingletonGraph {
         self.database = try database ?? AppDatabase()
         self.keychain = keychain
         securePairingStore = SecurePairingStore(keychain: keychain)
-        mailSettingsStore = MailSettingsStore(defaults: userDefaults, keychain: keychain)
         keywordSettingsStore = KeywordSettingsStore(defaults: userDefaults)
         notificationCursorStore = NotificationCursorStore(defaults: userDefaults)
+        contactCursorStore = ContactCursorStore(defaults: userDefaults)
+        contactPendingDeletesStore = ContactPendingDeletesStore(defaults: userDefaults)
+        pushSettingsStore = PushSettingsStore(defaults: userDefaults)
+        desktopSessionStore = DesktopSessionStore(keychain: keychain)
     }
 }

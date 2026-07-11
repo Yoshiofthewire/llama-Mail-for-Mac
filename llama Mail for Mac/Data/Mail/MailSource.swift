@@ -10,11 +10,20 @@ import Foundation
 
 /// Message ids are Strings (`Email.serverId`) — relay ids.
 protocol MailSource: Sendable {
-    func listFolders() async throws -> [MailFolder]
+    /// Lists folders; `parent` scopes to that folder's children (nil = top level).
+    func listFolders(parent: String?) async throws -> [MailFolder]
     func fetchEmails(folder: String, from: Int, to: Int) async throws -> [Email]
     func search(folder: String, query: String) async throws -> [String]
     func setKeywords(folder: String, messageId: String, keywords: [String]) async throws
+    func move(messageIds: [String], from mailbox: String, to targetMailbox: String) async throws
     func send(email: OutgoingEmail) async throws
+}
+
+extension MailSource {
+    /// Top-level folders.
+    func listFolders() async throws -> [MailFolder] {
+        try await listFolders(parent: nil)
+    }
 }
 
 /// Mail-layer failures that aren't plain network errors.

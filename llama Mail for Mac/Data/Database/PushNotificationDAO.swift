@@ -11,22 +11,30 @@ import SwiftData
 
 @ModelActor
 actor PushNotificationDAO {
-    /// Inserts a notification; silently skips duplicates (same seq).
-    func insert(notification: PushNotification) throws {
+    /// Inserts a notification; skips duplicates (same seq).
+    /// - Returns: false if an entry with that seq already existed.
+    @discardableResult
+    func insert(notification: PushNotification) throws -> Bool {
         let seq = notification.seq
         var descriptor = FetchDescriptor<PushNotificationEntity>(
             predicate: #Predicate { $0.seq == seq }
         )
         descriptor.fetchLimit = 1
-        guard try modelContext.fetch(descriptor).isEmpty else { return }
+        guard try modelContext.fetch(descriptor).isEmpty else { return false }
         modelContext.insert(PushNotificationEntity(from: notification))
         try modelContext.save()
+        return true
     }
 
-    /// Newest-first notification history.
+    /// Newest-first notification history. Sorted by receivedAt (seq as
+    /// tiebreaker) because push-mode entries use synthesized seqs that don't
+    /// share a scale with pull-mode server seqs.
     func listHistory(limit: Int) throws -> [PushNotification] {
         var descriptor = FetchDescriptor<PushNotificationEntity>(
-            sortBy: [SortDescriptor(\.seq, order: .reverse)]
+            sortBy: [
+                SortDescriptor(\.receivedAt, order: .reverse),
+                SortDescriptor(\.seq, order: .reverse),
+            ]
         )
         descriptor.fetchLimit = limit
         return try modelContext.fetch(descriptor).map(\.toDomain)

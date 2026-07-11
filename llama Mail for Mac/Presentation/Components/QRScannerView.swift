@@ -8,6 +8,7 @@
 
 #if os(iOS)
 import SwiftUI
+import Vision
 import VisionKit
 import AVFoundation
 

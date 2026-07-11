@@ -8,14 +8,14 @@
 import Foundation
 
 struct Email: Identifiable, Hashable, Sendable {
-    /// IMAP UID or Relay ID.
+    /// Relay message id.
     var serverId: String
     var folder: String
     var senderName: String
     var senderEmail: String
     var subject: String
     var body: String
-    /// IMAP user flags (KEYWORD tokens) or relay tab/label values; drives inbox tabs.
+    /// Relay tab/label values; drives inbox tabs.
     var keywords: Set<String>
     var receivedAt: Date
     var read: Bool
@@ -24,9 +24,29 @@ struct Email: Identifiable, Hashable, Sendable {
     var id: String { serverId }
 }
 
-/// A folder on the mail server (spec §2 MailGateway.listFolders).
+/// A folder/mailbox on the relay.
 struct MailFolder: Hashable, Sendable {
     var name: String
+}
+
+/// Built-in relay mailboxes. Binding contract: values are the exact
+/// `mailbox` parameter names the relay and the Android reference use
+/// (InboxActivity switches between "INBOX"/"Junk"/"Trash").
+enum StandardFolder {
+    static let inbox = "INBOX"
+    static let drafts = "Drafts"
+    static let junk = "Junk"
+    static let sent = "Sent"
+    static let trash = "Trash"
+    static let archive = "Archive"
+
+    /// Human title for a mailbox path: "INBOX" → "Inbox",
+    /// "Archive/Receipts" → "Receipts". The backend treats both "/" and "."
+    /// as hierarchy delimiters (server.go mailboxParentPath), so both split.
+    static func displayName(_ path: String) -> String {
+        if path == inbox { return "Inbox" }
+        return path.split(whereSeparator: { $0 == "/" || $0 == "." }).last.map(String.init) ?? path
+    }
 }
 
 /// An email being composed (spec §7 SendEmailUseCase).
