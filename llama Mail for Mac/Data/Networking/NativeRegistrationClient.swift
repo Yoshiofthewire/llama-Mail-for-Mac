@@ -8,6 +8,9 @@
 //
 
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct RegistrationResponse: Decodable, Equatable, Sendable {
     enum DeliveryMode: String, Decodable, Sendable {
@@ -42,13 +45,16 @@ enum RegistrationOutcome: Equatable, Sendable {
 
 final class NativeRegistrationClient: Sendable {
     private struct RegisterRequest: Encodable {
-        // Binding contract (verified against the live backend 2026-07-10):
-        // subscriberId, pairingToken, and deviceToken are required in the
-        // body; anything else returns 400.
+        // Binding contract (backend nativeRegisterRequest in server.go):
+        // subscriberId, pairingToken, and deviceToken are required (400 if
+        // missing); platform and deviceName are optional. deviceName is what
+        // the server's paired-device list displays — without it the UI falls
+        // back to platform, and unknown platforms normalize to "android".
         var subscriberId: String
         var pairingToken: String
         var deviceToken: String
         var platform: String
+        var deviceName: String
     }
 
     private let httpClient: HTTPClient
@@ -65,8 +71,13 @@ final class NativeRegistrationClient: Sendable {
         }
 #if os(macOS)
         let platform = "macos"
+        let deviceName = Host.current().localizedName ?? "Mac"
 #else
         let platform = "ios"
+        // Without the user-assigned-device-name entitlement this is the
+        // generic model name ("iPhone"), which still beats the platform
+        // fallback the server shows otherwise.
+        let deviceName = await MainActor.run { UIDevice.current.name }
 #endif
         do {
             let response = try await httpClient.post(
@@ -77,7 +88,8 @@ final class NativeRegistrationClient: Sendable {
                     subscriberId: params.sub,
                     pairingToken: params.pt,
                     deviceToken: deviceToken,
-                    platform: platform
+                    platform: platform,
+                    deviceName: deviceName
                 )
             )
             return .success(response)

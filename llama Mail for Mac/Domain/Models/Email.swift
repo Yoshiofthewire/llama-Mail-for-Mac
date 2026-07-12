@@ -56,13 +56,29 @@ struct OutgoingEmail: Sendable {
     var bcc: [String]
     var subject: String
     var body: String
-    // ponytail: no attachment support in v1, add file picker + multipart/form-data in v2
-    var attachments: [AttachmentRef] = []
+    /// Relay send mode: "plain" (default), "html", or "markup".
+    var mode: String = "plain"
+    var attachments: [OutgoingAttachment] = []
     /// Relay mode only: server-side categorization.
     var tab: String?
 }
 
-struct AttachmentRef: Hashable, Sendable {
-    var fileName: String
-    var url: URL
+/// A file attached to an outgoing email; sent base64-encoded in the
+/// /api/mail/send JSON body (Mobile_Mail_Relay.md, 25 MB total cap).
+struct OutgoingAttachment: Hashable, Sendable {
+    var name: String
+    var mimeType: String
+    var data: Data
+}
+
+/// Metadata for one attachment on a received email, from
+/// GET /api/mail/attachments. Content downloads separately by index.
+struct EmailAttachment: Identifiable, Hashable, Sendable {
+    var index: Int
+    var name: String
+    var mimeType: String
+    /// Decoded size in bytes.
+    var size: Int
+
+    var id: Int { index }
 }

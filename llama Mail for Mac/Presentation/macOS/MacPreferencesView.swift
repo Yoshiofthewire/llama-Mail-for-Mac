@@ -18,7 +18,9 @@ struct MacPreferencesView: View {
         pushSettingsStore: SingletonGraph.shared.pushSettingsStore,
         desktopSessionStore: SingletonGraph.shared.desktopSessionStore,
         mailRepository: SingletonGraph.shared.mailRepository,
-        keywordRepository: SingletonGraph.shared.keywordRepository
+        keywordRepository: SingletonGraph.shared.keywordRepository,
+        contactsSettingsStore: SingletonGraph.shared.contactsSettingsStore,
+        systemContactsExporter: SingletonGraph.shared.systemContactsExporter
     )
 
     var body: some View {
@@ -31,6 +33,9 @@ struct MacPreferencesView: View {
 
             KeywordsPane(viewModel: viewModel)
                 .tabItem { Label("Keywords", systemImage: "tag") }
+
+            ContactsPane(viewModel: viewModel)
+                .tabItem { Label("Contacts", systemImage: "person.crop.circle") }
 
             NotificationsPane(viewModel: viewModel)
                 .tabItem { Label("Notifications", systemImage: "bell.badge") }
@@ -223,6 +228,61 @@ private struct KeywordsPane: View {
         }
         .formStyle(.grouped)
         .task { await viewModel.loadKeywordSettings() }
+    }
+}
+
+// MARK: - Contacts
+
+private struct ContactsPane: View {
+    @Bindable var viewModel: SettingsViewModel
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Sync contacts with Apple Contacts", isOn: $viewModel.exportContactsToSystem)
+                if viewModel.contactsExportDenied {
+                    HStack {
+                        Text("Contacts access is denied for llama Mail.")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Open System Settings") {
+                            viewModel.openContactsPrivacySettings()
+                        }
+                    }
+                }
+            } footer: {
+                Text("Contacts sync both ways: new cards you add in Apple Contacts are imported, matching contacts (same email) are linked instead of duplicated, and only cards created or imported by llama Mail are ever updated or removed.")
+            }
+
+            if viewModel.exportContactsToSystem || viewModel.hasExportedContacts {
+                Section {
+                    HStack {
+                        if viewModel.exportContactsToSystem {
+                            Button("Re-export Missing Contacts") {
+                                Task { await viewModel.reexportMissingContacts() }
+                            }
+                        }
+                        Spacer()
+                        if viewModel.hasExportedContacts {
+                            Button("Remove Exported Contacts", role: .destructive) {
+                                viewModel.removeExportedContacts()
+                            }
+                        }
+                    }
+                } footer: {
+                    Text("Re-export recreates cards that were removed from Apple Contacts outside llama Mail.")
+                }
+            }
+
+            if let message = viewModel.statusMessage {
+                Section {
+                    Text(message)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { viewModel.refreshContactsExportState() }
     }
 }
 

@@ -47,6 +47,13 @@ struct InboxView: View {
                         EmailListRow(email: email)
                     }
                     .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            Task { await viewModel.delete(serverIds: [email.serverId]) }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                     .listRowBackground(theme.bg)
                     .listRowSeparatorTint(theme.line)
                 }

@@ -7,15 +7,22 @@
 //  STYLE_GUIDE §2 (web .email-reader-body-block). Reply/forward are v2 stubs.
 //
 
+import QuickLook
 import SwiftUI
 import WebKit
 
 struct EmailDetailView: View {
     @Environment(\.theme) private var theme
     @Environment(\.self) private var environment
+    @Environment(\.dismiss) private var dismiss
 
     let email: Email
     let inboxViewModel: InboxViewModel
+
+    /// Fetched lazily on open — the inbox listing has no attachment info.
+    @State private var attachments: [EmailAttachment] = []
+    @State private var downloadingIndex: Int?
+    @State private var quickLookURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -23,6 +30,10 @@ struct EmailDetailView: View {
                 .padding()
                 .background(theme.panel, in: RoundedRectangle(cornerRadius: Shape.panel))
                 .padding([.horizontal, .top])
+
+            if !attachments.isEmpty {
+                attachmentBar
+            }
 
             if bodyLooksLikeHTML {
                 EmailBodyWebView(html: themedHTML(email.body))
@@ -40,8 +51,70 @@ struct EmailDetailView: View {
         }
         .background(theme.bg)
         .navigationTitle(email.senderName.isEmpty ? "Email" : email.senderName)
+        .toolbar {
+            ToolbarItem {
+                Button(role: .destructive) {
+                    Task {
+                        await inboxViewModel.delete(serverIds: [email.serverId])
+                        dismiss()
+                    }
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .help("Move to Trash")
+            }
+        }
+        .quickLookPreview($quickLookURL)
         .task {
             await inboxViewModel.markRead(email)
+            attachments = await inboxViewModel.attachments(for: email)
+        }
+    }
+
+    /// Attachment chips; tapping downloads to a temp file and Quick Looks it.
+    private var attachmentBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(attachments) { attachment in
+                    Button {
+                        openAttachment(attachment)
+                    } label: {
+                        HStack(spacing: 6) {
+                            if downloadingIndex == attachment.index {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "paperclip")
+                                    .font(.system(size: 11))
+                            }
+                            Text(attachment.name)
+                                .font(AppFont.ui(12, weight: .medium))
+                                .foregroundStyle(theme.inkStrong)
+                                .lineLimit(1)
+                            Text(attachment.size.formatted(.byteCount(style: .file)))
+                                .font(AppFont.ui(10))
+                                .foregroundStyle(theme.ink.opacity(0.7))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(theme.panel, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(downloadingIndex != nil)
+                    .help("Download and preview")
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+        }
+    }
+
+    private func openAttachment(_ attachment: EmailAttachment) {
+        downloadingIndex = attachment.index
+        Task {
+            if let url = await inboxViewModel.downloadAttachment(attachment, of: email) {
+                quickLookURL = url
+            }
+            downloadingIndex = nil
         }
     }
 

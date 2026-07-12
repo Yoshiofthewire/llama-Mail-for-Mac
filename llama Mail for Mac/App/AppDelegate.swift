@@ -15,6 +15,7 @@ private enum PushLifecycle {
     static func onLaunch() {
         let graph = SingletonGraph.shared
         graph.pushNotificationDispatcher.configure()
+        graph.systemContactsChangeMonitor.start()
         Task {
             await graph.pushNotificationDispatcher.requestAuthorization()
         }
@@ -41,6 +42,10 @@ private enum PushLifecycle {
         graph.pullPollingScheduler.startForegroundPolling()
         Task {
             await graph.pullPollingScheduler.pollNow()
+        }
+        // Catch cards added in Contacts.app while we weren't running.
+        Task {
+            await graph.systemContactsChangeMonitor.reconcileNow()
         }
     }
 

@@ -16,6 +16,14 @@ protocol MailSource: Sendable {
     func search(folder: String, query: String) async throws -> [String]
     func setKeywords(folder: String, messageId: String, keywords: [String]) async throws
     func move(messageIds: [String], from mailbox: String, to targetMailbox: String) async throws
+    /// Deletes messages. The relay moves them to Trash, or expunges them
+    /// permanently when `mailbox` is already Trash (server.go ApplyInboxAction).
+    func delete(messageIds: [String], mailbox: String) async throws
+    /// Attachment metadata for one message (fetched lazily on open; the
+    /// inbox listing carries no attachment info).
+    func listAttachments(folder: String, messageId: String) async throws -> [EmailAttachment]
+    /// One attachment's raw bytes, by its index from `listAttachments`.
+    func downloadAttachment(folder: String, messageId: String, index: Int) async throws -> Data
     func send(email: OutgoingEmail) async throws
 }
 

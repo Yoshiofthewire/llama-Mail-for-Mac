@@ -11,10 +11,12 @@ import SwiftUI
 struct LlamaCommands: Commands {
     let router: NavigationRouter
 
+    @Environment(\.openWindow) private var openWindow
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Email") {
-                router.composeRequested = true
+                openWindow(id: "compose")
             }
             .keyboardShortcut("n")
         }

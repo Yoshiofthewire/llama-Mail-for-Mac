@@ -18,6 +18,33 @@ struct SystemContactLink: Codable, Equatable, Sendable {
     var cnIdentifier: String
     /// `updatedAt` of the contact when last exported; unchanged contacts skip.
     var exportedUpdatedAt: Date
+    /// True when the card originated in Contacts.app (sync-back import);
+    /// "Remove Exported Contacts" keeps these cards.
+    var imported: Bool
+
+    init(
+        localId: UUID,
+        uid: String?,
+        cnIdentifier: String,
+        exportedUpdatedAt: Date,
+        imported: Bool = false
+    ) {
+        self.localId = localId
+        self.uid = uid
+        self.cnIdentifier = cnIdentifier
+        self.exportedUpdatedAt = exportedUpdatedAt
+        self.imported = imported
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        localId = try container.decode(UUID.self, forKey: .localId)
+        uid = try container.decodeIfPresent(String.self, forKey: .uid)
+        cnIdentifier = try container.decode(String.self, forKey: .cnIdentifier)
+        exportedUpdatedAt = try container.decode(Date.self, forKey: .exportedUpdatedAt)
+        // Links written before sync-back existed are all exports.
+        imported = try container.decodeIfPresent(Bool.self, forKey: .imported) ?? false
+    }
 }
 
 final class SystemContactsLinkStore {
@@ -59,5 +86,41 @@ final class SystemContactsLinkStore {
     private func save(_ links: [SystemContactLink]) {
         guard let data = try? JSONEncoder().encode(links) else { return }
         defaults.set(data, forKey: Self.key)
+    }
+}
+
+/// Card identifiers that already existed when contacts sync first ran; those
+/// are never auto-imported, so enabling sync-back doesn't pull the user's
+/// whole address book into the app.
+final class SystemContactsBaselineStore {
+    private static let key = "contacts.systemBaseline"
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+    }
+
+    /// Captured once, on the first reconcile with access; an empty capture is
+    /// still a capture (user with no contacts yet).
+    var isCaptured: Bool {
+        defaults.object(forKey: Self.key) != nil
+    }
+
+    func capture(identifiers: [String]) {
+        defaults.set(identifiers, forKey: Self.key)
+    }
+
+    func identifiers() -> Set<String> {
+        Set(defaults.stringArray(forKey: Self.key) ?? [])
+    }
+
+    /// Marks a card as never-import again (used when an imported link is
+    /// forgotten but the user's card is kept).
+    func add(_ identifier: String) {
+        var identifiers = defaults.stringArray(forKey: Self.key) ?? []
+        guard !identifiers.contains(identifier) else { return }
+        identifiers.append(identifier)
+        defaults.set(identifiers, forKey: Self.key)
     }
 }

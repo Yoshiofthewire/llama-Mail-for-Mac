@@ -87,6 +87,19 @@ final class HTTPClient: Sendable {
         return try await decode(execute(request))
     }
 
+    /// GET returning the raw response body (attachment downloads).
+    func getData(
+        url: URL,
+        query: [URLQueryItem] = [],
+        headers: [String: String] = [:]
+    ) async throws -> Data {
+        var request = URLRequest(url: try url.appending(queryOrThrow: query))
+        for (field, value) in headers {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+        return try await execute(request)
+    }
+
     func post<Response: Decodable>(
         _ type: Response.Type,
         url: URL,

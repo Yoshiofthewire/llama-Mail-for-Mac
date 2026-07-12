@@ -41,8 +41,6 @@ final class NavigationRouter {
     var mfaRoute: MfaRoute?
     /// Message the inbox should open once loaded (from a notification tap).
     var pendingMessageId: String?
-    /// Set by the macOS File → New Email menu command (Cmd+N).
-    var composeRequested = false
 
     private let deepLinkHandler: DeepLinkHandler
 

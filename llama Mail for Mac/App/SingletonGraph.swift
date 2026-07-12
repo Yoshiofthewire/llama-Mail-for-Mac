@@ -31,6 +31,9 @@ final class SingletonGraph {
     let notificationCursorStore: NotificationCursorStore
     let contactCursorStore: ContactCursorStore
     let contactPendingDeletesStore: ContactPendingDeletesStore
+    let contactsSettingsStore: ContactsSettingsStore
+    let systemContactsLinkStore: SystemContactsLinkStore
+    let systemContactsBaselineStore: SystemContactsBaselineStore
     let pushSettingsStore: PushSettingsStore
     let desktopSessionStore: DesktopSessionStore
 
@@ -58,12 +61,24 @@ final class SingletonGraph {
     )
     lazy var keywordRepository = KeywordRepository(settingsStore: keywordSettingsStore)
     lazy var sendEmailUseCase = SendEmailUseCase(repository: mailRepository)
+    lazy var systemContactsExporter = SystemContactsExporter(
+        store: LiveSystemContactStore(),
+        linkStore: systemContactsLinkStore,
+        baselineStore: systemContactsBaselineStore,
+        settings: contactsSettingsStore,
+        contactDAO: contactDAO
+    )
+    lazy var systemContactsChangeMonitor = SystemContactsChangeMonitor(
+        exporter: systemContactsExporter,
+        repository: contactSyncRepository
+    )
     lazy var contactSyncRepository = ContactSyncRepository(
         client: contactSyncClient,
         contactDAO: contactDAO,
         cursorStore: contactCursorStore,
         pendingDeletesStore: contactPendingDeletesStore,
-        securePairingStore: securePairingStore
+        securePairingStore: securePairingStore,
+        systemContactsExporter: systemContactsExporter
     )
     lazy var pushRepository = PushRepository(
         dao: pushNotificationDAO,
@@ -123,6 +138,9 @@ final class SingletonGraph {
         notificationCursorStore = NotificationCursorStore(defaults: userDefaults)
         contactCursorStore = ContactCursorStore(defaults: userDefaults)
         contactPendingDeletesStore = ContactPendingDeletesStore(defaults: userDefaults)
+        contactsSettingsStore = ContactsSettingsStore(defaults: userDefaults)
+        systemContactsLinkStore = SystemContactsLinkStore(defaults: userDefaults)
+        systemContactsBaselineStore = SystemContactsBaselineStore(defaults: userDefaults)
         pushSettingsStore = PushSettingsStore(defaults: userDefaults)
         desktopSessionStore = DesktopSessionStore(keychain: keychain)
     }

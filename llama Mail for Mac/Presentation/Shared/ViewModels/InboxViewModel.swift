@@ -70,15 +70,35 @@ final class InboxViewModel {
     /// Moves emails to another folder (drag & drop), then re-syncs the list.
     func move(serverIds: [String], to targetFolder: String) async {
         guard !serverIds.isEmpty, targetFolder != folder else { return }
+        await removeAndSync(serverIds: serverIds, failureVerb: "move") { [self] in
+            try await mailRepository.move(messageIds: serverIds, from: folder, to: targetFolder)
+        }
+    }
+
+    /// Deletes emails (the relay moves them to Trash, or expunges them when
+    /// this folder is already Trash), then re-syncs the list.
+    func delete(serverIds: [String]) async {
+        guard !serverIds.isEmpty else { return }
+        await removeAndSync(serverIds: serverIds, failureVerb: "delete") { [self] in
+            try await mailRepository.delete(messageIds: serverIds, from: folder)
+        }
+    }
+
+    /// Optimistically drops `serverIds` from the list, runs the server
+    /// operation, then refreshes so the list matches the server either way.
+    private func removeAndSync(
+        serverIds: [String],
+        failureVerb: String,
+        _ operation: () async throws -> Void
+    ) async {
         emails.removeAll { serverIds.contains($0.serverId) }
         tabs = keywordRepository.visibleTabs(from: emails)
         do {
-            try await mailRepository.move(messageIds: serverIds, from: folder, to: targetFolder)
-            await refresh()
+            try await operation()
         } catch {
-            errorMessage = "Could not move: \(error.localizedDescription)"
-            await refresh()
+            errorMessage = "Could not \(failureVerb): \(error.localizedDescription)"
         }
+        await refresh()
     }
 
     /// Instant display from the local cache, then a server refresh.
@@ -129,6 +149,38 @@ final class InboxViewModel {
     /// Resolves a notification tap's messageId to a cached email.
     func email(withServerId serverId: String) -> Email? {
         emails.first { $0.serverId == serverId }
+    }
+
+    /// Attachment metadata for an email, fetched lazily when it's opened
+    /// (the inbox listing carries none). Errors surface as an empty list.
+    func attachments(for email: Email) async -> [EmailAttachment] {
+        (try? await mailRepository.listAttachments(
+            folder: email.folder, messageId: email.serverId
+        )) ?? []
+    }
+
+    /// Downloads one attachment to a temporary file and returns its URL
+    /// (for Quick Look / opening externally), or nil on failure.
+    func downloadAttachment(_ attachment: EmailAttachment, of email: Email) async -> URL? {
+        do {
+            let data = try await mailRepository.downloadAttachment(
+                folder: email.folder,
+                messageId: email.serverId,
+                index: attachment.index
+            )
+            let directory = FileManager.default.temporaryDirectory
+                .appending(path: "attachments/\(email.serverId)/\(attachment.index)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let safeName = attachment.name
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "\0", with: "")
+            let file = directory.appending(path: safeName.isEmpty ? "attachment" : safeName)
+            try data.write(to: file)
+            return file
+        } catch {
+            errorMessage = "Could not download attachment: \(error.localizedDescription)"
+            return nil
+        }
     }
 
     private func apply(emails newEmails: [Email]) {

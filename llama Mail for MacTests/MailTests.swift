@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import SwiftUI
 import Testing
 @testable import llama_Mail_for_Mac
 
@@ -184,6 +185,21 @@ private func makeOutgoing(
         try await source.move(messageIds: ["e-1", "e-2"], from: "INBOX", to: "Archive/2026")
     }
 
+    @Test func deletePostsBulkActionBodyWithoutTarget() async throws {
+        let client = stubClient(json: #"{"ok": true}"#) { request in
+            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/inbox/actions?"))
+            #expect(request.httpMethod == "POST")
+            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
+            #expect(body.contains(#""action":"delete""#))
+            #expect(body.contains(#""messageIds":["e-1","e-2"]"#))
+            #expect(body.contains(#""mailbox":"Trash""#))
+            // targetMailbox is move-only; nil must be omitted, not null.
+            #expect(!body.contains("targetMailbox"))
+        }
+        let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
+        try await source.delete(messageIds: ["e-1", "e-2"], mailbox: "Trash")
+    }
+
     @Test func sendPostsCommaStringBody() async throws {
         let client = stubClient(json: #"{"ok": true, "sentSaved": true}"#) { request in
             #expect(request.url!.absoluteString.hasPrefix("\(server)/api/mail/send?"))
@@ -191,9 +207,120 @@ private func makeOutgoing(
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""to":"a@x.com, b@x.com""#))
             #expect(body.contains(#""mode":"plain""#))
+            // No attachments → the key is omitted entirely, not null/[].
+            #expect(!body.contains("attachments"))
         }
         let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
         try await source.send(email: makeOutgoing())
+    }
+
+    @Test func sendEncodesModeAndBase64Attachments() throws {
+        var email = makeOutgoing()
+        email.mode = "html"
+        email.attachments = [OutgoingAttachment(
+            name: "a.txt",
+            mimeType: "text/plain",
+            data: Data("hello".utf8)
+        )]
+        let request = RelaySendRequest(from: email)
+        let data = try JSONEncoder().encode(request)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["mode"] as? String == "html")
+        let attachments = try #require(object["attachments"] as? [[String: Any]])
+        #expect(attachments.count == 1)
+        #expect(attachments[0]["name"] as? String == "a.txt")
+        #expect(attachments[0]["mimeType"] as? String == "text/plain")
+        #expect(attachments[0]["dataBase64"] as? String == Data("hello".utf8).base64EncodedString())
+    }
+
+    @Test func listAttachmentsMapsMetadata() async throws {
+        let json = #"{"ok": true, "attachments": [{"index": 0, "name": "report.pdf", "mimeType": "application/pdf", "size": 1234}, {"index": 1}]}"#
+        let client = stubClient(json: json) { request in
+            let url = request.url!.absoluteString
+            #expect(url.hasPrefix("\(server)/api/mail/attachments?"))
+            #expect(url.contains("mailbox=INBOX"))
+            #expect(url.contains("messageId=42"))
+        }
+        let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
+        let attachments = try await source.listAttachments(folder: "INBOX", messageId: "42")
+
+        #expect(attachments.count == 2)
+        #expect(attachments[0] == EmailAttachment(
+            index: 0, name: "report.pdf", mimeType: "application/pdf", size: 1234
+        ))
+        // Missing fields get safe fallbacks.
+        #expect(attachments[1] == EmailAttachment(
+            index: 1, name: "attachment", mimeType: "application/octet-stream", size: 0
+        ))
+    }
+
+    @Test func downloadAttachmentReturnsRawBytes() async throws {
+        let client = stubClient(json: "raw-bytes") { request in
+            let url = request.url!.absoluteString
+            #expect(url.hasPrefix("\(server)/api/mail/attachment?"))
+            #expect(url.contains("messageId=42"))
+            #expect(url.contains("index=1"))
+        }
+        let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
+        let data = try await source.downloadAttachment(folder: "INBOX", messageId: "42", index: 1)
+        #expect(String(decoding: data, as: UTF8.self) == "raw-bytes")
+    }
+}
+
+// MARK: - Rich text → HTML (compose mode:"html")
+
+@Suite struct RichTextHTMLTests {
+    /// Fake trait resolver so tests don't need a font resolution context.
+    private let noTraits: RichTextHTML.FontTraits = { _ in (false, false) }
+    private let allBold: RichTextHTML.FontTraits = { _ in (true, false) }
+
+    @Test func escapesMarkupCharacters() {
+        #expect(RichTextHTML.escape(#"<a href="x">&"#) == "&lt;a href=&quot;x&quot;&gt;&amp;")
+    }
+
+    @Test func plainTextHasNoFormatting() {
+        let text = AttributedString("just words\ntwo lines")
+        #expect(!RichTextHTML.hasFormatting(text, fontTraits: noTraits))
+        // Fonts resolve to regular → still plain even with a font attribute.
+        var fonted = AttributedString("styled?")
+        fonted.font = .body
+        #expect(!RichTextHTML.hasFormatting(fonted, fontTraits: noTraits))
+    }
+
+    @Test func underlineAndBoldCountAsFormatting() {
+        var underlined = AttributedString("hello")
+        underlined.underlineStyle = .single
+        #expect(RichTextHTML.hasFormatting(underlined, fontTraits: noTraits))
+
+        var fonted = AttributedString("hello")
+        fonted.font = .body
+        #expect(RichTextHTML.hasFormatting(fonted, fontTraits: allBold))
+    }
+
+    @Test func htmlDocumentWrapsAndTagsRuns() {
+        var text = AttributedString("plain ")
+        var bold = AttributedString("bold&co")
+        bold.font = .body
+        var underlined = AttributedString(" under\nline")
+        underlined.underlineStyle = .single
+        text += bold
+        text += underlined
+
+        let html = RichTextHTML.htmlDocument(from: text) { _ in (true, false) }
+        #expect(html.hasPrefix("<html><body>"))
+        #expect(html.hasSuffix("</body></html>"))
+        // The unfonted runs also resolve bold here, so just check the tagged
+        // pieces landed with escaping and <br> conversion intact.
+        #expect(html.contains("<strong>bold&amp;co</strong>"))
+        #expect(html.contains("<u>"))
+        #expect(html.contains("<br>"))
+    }
+
+    @Test func linksBecomeAnchors() {
+        var text = AttributedString("llama")
+        text.link = URL(string: "https://mail.urlxl.com/x?a=1&b=2")
+        let html = RichTextHTML.htmlDocument(from: text, fontTraits: noTraits)
+        #expect(html.contains(#"<a href="https://mail.urlxl.com/x?a=1&amp;b=2">llama</a>"#))
     }
 }
 
@@ -331,6 +458,19 @@ private func makeOutgoing(
         let send = try makeUseCase(client: stubClient(json: #"{"ok": true}"#))
         let outcome = await send(makeOutgoing())
         #expect(outcome == .success)
+    }
+
+    @Test func rejectsOversizedAttachments() async throws {
+        let send = try makeUseCase(client: stubClient(json: #"{"ok": true}"#))
+        var email = makeOutgoing()
+        // Two 13 MB files cross the 25 MB budget (backend maxMailAttachmentBytes).
+        let big = Data(count: 13 << 20)
+        email.attachments = [
+            OutgoingAttachment(name: "one", mimeType: "application/octet-stream", data: big),
+            OutgoingAttachment(name: "two", mimeType: "application/octet-stream", data: big),
+        ]
+        let outcome = await send(email)
+        #expect(outcome == .invalid("Attachments too large (max 25 MB total)"))
     }
 
     @Test func addressShapeCheck() {

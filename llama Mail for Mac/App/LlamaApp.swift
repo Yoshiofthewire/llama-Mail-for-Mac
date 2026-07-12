@@ -43,6 +43,17 @@ struct LlamaApp: App {
         }
         .defaultSize(width: 680, height: 620)
 
+        // Compose in its own resizable window (⌘N / toolbar).
+        WindowGroup("New Email", id: "compose") {
+            ComposeView()
+                .environment(themeManager)
+                .environment(router)
+                .environment(\.theme, themeManager.palette)
+                .preferredColorScheme(themeManager.palette.preferredColorScheme)
+                .background(themeManager.palette.bg.ignoresSafeArea())
+        }
+        .defaultSize(width: 640, height: 560)
+
         Settings {
             MacPreferencesView()
                 .environment(themeManager)

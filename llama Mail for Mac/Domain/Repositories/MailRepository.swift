@@ -62,6 +62,22 @@ final class MailRepository {
         try await makeSource().move(messageIds: messageIds, from: mailbox, to: targetMailbox)
     }
 
+    /// Deletes messages via the relay: moved to Trash, or expunged when
+    /// `mailbox` is already Trash.
+    func delete(messageIds: [String], from mailbox: String) async throws {
+        try await makeSource().delete(messageIds: messageIds, mailbox: mailbox)
+    }
+
+    /// Attachment metadata for one cached email (lazy, on open).
+    func listAttachments(folder: String, messageId: String) async throws -> [EmailAttachment] {
+        try await makeSource().listAttachments(folder: folder, messageId: messageId)
+    }
+
+    /// Raw bytes of one attachment.
+    func downloadAttachment(folder: String, messageId: String, index: Int) async throws -> Data {
+        try await makeSource().downloadAttachment(folder: folder, messageId: messageId, index: index)
+    }
+
     func markRead(serverId: String, read: Bool = true) async throws {
         try await emailDAO.updateEmail(serverId: serverId, read: read)
     }

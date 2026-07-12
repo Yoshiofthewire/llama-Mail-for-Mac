@@ -44,6 +44,51 @@ enum SystemContactMapper {
         return cn
     }
 
+    /// De-dupe identity across the app and Contacts.app: primary email when
+    /// present (case-insensitive), else name + phone digits. Nil when there
+    /// isn't enough signal to match safely.
+    static func matchKey(name: String, email: String, phone: String) -> String? {
+        let email = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !email.isEmpty { return "email:\(email)" }
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let digits = phone.filter(\.isNumber)
+        guard !name.isEmpty, !digits.isEmpty else { return nil }
+        return "name+phone:\(name)|\(digits)"
+    }
+
+    static func matchKey(for contact: Contact) -> String? {
+        matchKey(name: contact.name, email: contact.email, phone: contact.phone)
+    }
+
+    /// Every identity a card can match under: one key per email address,
+    /// else the name+phone fallback.
+    static func matchKeys(for cn: CNContact) -> [String] {
+        let name = [cn.givenName, cn.familyName].filter { !$0.isEmpty }.joined(separator: " ")
+        let emailKeys = cn.emailAddresses.compactMap {
+            matchKey(name: name, email: $0.value as String, phone: "")
+        }
+        if !emailKeys.isEmpty { return emailKeys }
+        let phone = cn.phoneNumbers.first?.value.stringValue ?? ""
+        return matchKey(name: name, email: "", phone: phone).map { [$0] } ?? []
+    }
+
+    /// Reverse mapping for sync-back: a card added in Contacts.app becomes a
+    /// local app contact queued for the next relay push.
+    static func contact(from cn: CNContact) -> Contact {
+        let now = Date()
+        return Contact(
+            name: [cn.givenName, cn.familyName]
+                .filter { !$0.isEmpty }
+                .joined(separator: " "),
+            email: cn.emailAddresses.first.map { $0.value as String } ?? "",
+            phone: cn.phoneNumbers.first?.value.stringValue ?? "",
+            avatarUrl: nil,
+            createdAt: now,
+            updatedAt: now,
+            needsSync: true
+        )
+    }
+
     static func apply(_ contact: Contact, to cn: CNMutableContact) {
         let (given, family) = nameComponents(from: contact.name, fallbackEmail: contact.email)
         cn.givenName = given

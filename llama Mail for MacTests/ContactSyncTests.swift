@@ -211,6 +211,29 @@ private func makeDTO(
         #expect(pending.first?.needsSync == true)
     }
 
+    @Test func concurrentSyncsPushPendingContactOnlyOnce() async throws {
+        final class MethodLog: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value: [String] = []
+            func append(_ method: String) { lock.lock(); value.append(method); lock.unlock() }
+            var methods: [String] { lock.lock(); defer { lock.unlock() }; return value }
+        }
+        let log = MethodLog()
+        let env = try makeEnvironment(client: stubClient(json: #"{"cursor": 1}"#) { request in
+            log.append(request.httpMethod ?? "")
+        })
+        try await env.repository.saveContact(makeContact(name: "Ada", email: "ada@example.com"))
+
+        async let first = env.repository.sync()
+        async let second = env.repository.sync()
+        _ = try await [first, second]
+
+        // Serialized: the first sync pushes the pending create; the second
+        // runs after it and has nothing queued, so it pulls. Overlapping
+        // syncs would push the same contact twice (server-side duplicate).
+        #expect(log.methods == ["POST", "GET"])
+    }
+
     @Test func fullSyncAssignsUidWithoutDuplicating() async throws {
         let json = """
         {

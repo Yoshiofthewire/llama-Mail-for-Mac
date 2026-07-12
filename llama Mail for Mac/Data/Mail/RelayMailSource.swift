@@ -140,11 +140,47 @@ struct RelayActionRequest: Encodable, Equatable, Sendable {
     var action: String
     var messageIds: [String]
     var mailbox: String
-    var targetMailbox: String?
+    /// Only "move" takes a target; JSONEncoder drops it when nil.
+    var targetMailbox: String? = nil
 }
 
 struct RelayActionResponse: Decodable, Sendable {
     var ok: Bool?
+}
+
+/// Attachment metadata from GET /api/mail/attachments.
+struct RelayAttachmentDTO: Decodable, Equatable, Sendable {
+    var index: Int
+    var name: String?
+    var mimeType: String?
+    var size: Int?
+
+    func toDomain() -> EmailAttachment {
+        EmailAttachment(
+            index: index,
+            name: name?.isEmpty == false ? name! : "attachment",
+            mimeType: mimeType ?? "application/octet-stream",
+            size: size ?? 0
+        )
+    }
+}
+
+struct RelayAttachmentListResponse: Decodable, Sendable {
+    var ok: Bool?
+    var attachments: [RelayAttachmentDTO]?
+}
+
+/// Outgoing attachment: base64 in the send/draft JSON (Mobile_Mail_Relay.md).
+struct RelaySendAttachmentDTO: Encodable, Equatable, Sendable {
+    var name: String
+    var mimeType: String
+    var dataBase64: String
+
+    init(from attachment: OutgoingAttachment) {
+        name = attachment.name
+        mimeType = attachment.mimeType
+        dataBase64 = attachment.data.base64EncodedString()
+    }
 }
 
 /// Send body with comma-joined recipients (Mobile_Mail_Relay.md Part 6) —
@@ -156,6 +192,8 @@ struct RelaySendRequest: Encodable, Equatable, Sendable {
     var subject: String
     var body: String
     var mode: String
+    /// Omitted from the JSON entirely when there are no attachments.
+    var attachments: [RelaySendAttachmentDTO]?
 
     init(from email: OutgoingEmail) {
         to = email.to.joined(separator: ", ")
@@ -163,7 +201,10 @@ struct RelaySendRequest: Encodable, Equatable, Sendable {
         bcc = email.bcc.joined(separator: ", ")
         subject = email.subject
         body = email.body
-        mode = "plain"
+        mode = email.mode
+        attachments = email.attachments.isEmpty
+            ? nil
+            : email.attachments.map(RelaySendAttachmentDTO.init)
     }
 }
 
@@ -232,6 +273,42 @@ final class RelayMailSource: MailSource {
                 mailbox: mailbox,
                 targetMailbox: targetMailbox
             )
+        )
+    }
+
+    func delete(messageIds: [String], mailbox: String) async throws {
+        _ = try await httpClient.post(
+            RelayActionResponse.self,
+            url: try endpoint("api/inbox/actions"),
+            query: auth.queryItems,
+            jsonBody: RelayActionRequest(
+                action: "delete",
+                messageIds: messageIds,
+                mailbox: mailbox
+            )
+        )
+    }
+
+    func listAttachments(folder: String, messageId: String) async throws -> [EmailAttachment] {
+        let response = try await httpClient.get(
+            RelayAttachmentListResponse.self,
+            url: try endpoint("api/mail/attachments"),
+            query: auth.queryItems + [
+                URLQueryItem(name: "mailbox", value: folder),
+                URLQueryItem(name: "messageId", value: messageId),
+            ]
+        )
+        return (response.attachments ?? []).map { $0.toDomain() }
+    }
+
+    func downloadAttachment(folder: String, messageId: String, index: Int) async throws -> Data {
+        try await httpClient.getData(
+            url: try endpoint("api/mail/attachment"),
+            query: auth.queryItems + [
+                URLQueryItem(name: "mailbox", value: folder),
+                URLQueryItem(name: "messageId", value: messageId),
+                URLQueryItem(name: "index", value: String(index)),
+            ]
         )
     }
 

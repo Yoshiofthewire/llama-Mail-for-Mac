@@ -9,11 +9,13 @@
 import Contacts
 import Foundation
 
-protocol SystemContactStoring: Sendable {
+protocol SystemContactStoring {
     var authorizationStatus: CNAuthorizationStatus { get }
     func requestAccess() async throws -> Bool
     /// Returns nil when the card no longer exists (deleted in Contacts.app).
     func fetch(identifier: String) throws -> CNContact?
+    /// Every card visible to the app, fetched with `SystemContactMapper.keysToFetch`.
+    func listAll() throws -> [CNContact]
     /// Caller reads `contact.identifier` afterwards to record the link.
     func add(_ contact: CNMutableContact) throws
     func update(_ contact: CNMutableContact) throws
@@ -21,8 +23,7 @@ protocol SystemContactStoring: Sendable {
     func delete(identifier: String) throws
 }
 
-/// CNContactStore is documented thread-safe, hence @unchecked.
-final class LiveSystemContactStore: SystemContactStoring, @unchecked Sendable {
+final class LiveSystemContactStore: SystemContactStoring {
     private let store = CNContactStore()
 
     var authorizationStatus: CNAuthorizationStatus {
@@ -42,6 +43,15 @@ final class LiveSystemContactStore: SystemContactStoring, @unchecked Sendable {
         } catch let error as CNError where error.code == .recordDoesNotExist {
             return nil
         }
+    }
+
+    func listAll() throws -> [CNContact] {
+        let request = CNContactFetchRequest(keysToFetch: SystemContactMapper.keysToFetch)
+        var cards: [CNContact] = []
+        try store.enumerateContacts(with: request) { contact, _ in
+            cards.append(contact)
+        }
+        return cards
     }
 
     func add(_ contact: CNMutableContact) throws {

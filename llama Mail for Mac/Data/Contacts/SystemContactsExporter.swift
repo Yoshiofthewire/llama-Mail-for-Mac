@@ -2,16 +2,20 @@
 //  SystemContactsExporter.swift
 //  llama Mail
 //
-//  One-way export of app contacts into the system Contacts database, gated by
-//  the ContactsSettingsStore toggle. Identity is link-based (localId ->
-//  CNContact identifier via SystemContactsLinkStore): the exporter only ever
-//  updates or deletes cards it created itself. Best-effort: each card gets
-//  its own CNSaveRequest so one failure never aborts the batch, and failed
-//  items stay retriable on the next reconcile.
+//  Two-way sync with the system Contacts database, gated by the
+//  ContactsSettingsStore toggle. Export: app contacts become cards. Import
+//  (sync-back): cards added in Contacts.app after sync was first enabled
+//  become app contacts queued for the next relay push; everything older is
+//  baselined and left alone. Identity is link-based (localId -> CNContact
+//  identifier via SystemContactsLinkStore): only linked cards are ever
+//  updated or deleted. Best-effort: each card gets its own CNSaveRequest so
+//  one failure never aborts the batch, and failed items stay retriable on
+//  the next reconcile.
 //
 
 import Contacts
 import Foundation
+import os
 
 struct SystemContactsExportPlan: Equatable, Sendable {
     struct Update: Equatable, Sendable {
@@ -26,7 +30,9 @@ struct SystemContactsExportPlan: Equatable, Sendable {
 
     /// Contacts with no link yet.
     var creates: [Contact] = []
-    /// Linked contacts edited since their last export.
+    /// Linked contacts edited since their last export, plus links whose card
+    /// no longer exists (deleted in Contacts.app or its account was removed);
+    /// the upsert path recreates those cards.
     var updates: [Update] = []
     /// Links whose contact is gone from the app; the only cards ever deleted.
     var deletes: [SystemContactLink] = []
@@ -37,7 +43,8 @@ struct SystemContactsExportPlan: Equatable, Sendable {
 enum SystemContactsDiff {
     static func plan(
         contacts: [Contact],
-        links: [SystemContactLink]
+        links: [SystemContactLink],
+        existingCardIdentifiers: Set<String>
     ) -> SystemContactsExportPlan {
         var plan = SystemContactsExportPlan()
         let contactsByLocalId = Dictionary(
@@ -53,7 +60,11 @@ enum SystemContactsDiff {
                 continue
             }
             matchedLocalIds.insert(contact.localId)
-            if contact.updatedAt > link.exportedUpdatedAt {
+            // A missing card is re-exported even when the contact itself is
+            // unchanged; otherwise stale links mask externally deleted cards
+            // forever and reconciles report "Exported 0".
+            if contact.updatedAt > link.exportedUpdatedAt
+                || !existingCardIdentifiers.contains(link.cnIdentifier) {
                 plan.updates.append(.init(contact: contact, cnIdentifier: link.cnIdentifier))
             }
         }
@@ -78,27 +89,32 @@ enum SystemContactsDiff {
     }
 }
 
-actor SystemContactsExporter {
+final class SystemContactsExporter {
     struct Summary: Equatable, Sendable {
         var created = 0
         var updated = 0
         var deleted = 0
+        var imported = 0
+        var adopted = 0
         var failed = 0
     }
 
     private let store: SystemContactStoring
     private let linkStore: SystemContactsLinkStore
+    private let baselineStore: SystemContactsBaselineStore
     private let settings: ContactsSettingsStore
     private let contactDAO: ContactDAO
 
     init(
         store: SystemContactStoring,
         linkStore: SystemContactsLinkStore,
+        baselineStore: SystemContactsBaselineStore,
         settings: ContactsSettingsStore,
         contactDAO: ContactDAO
     ) {
         self.store = store
         self.linkStore = linkStore
+        self.baselineStore = baselineStore
         self.settings = settings
         self.contactDAO = contactDAO
     }
@@ -134,14 +150,41 @@ actor SystemContactsExporter {
 
     // MARK: - Export
 
-    /// Full diff of app contacts against the link store; runs after every
-    /// relay sync and on first enable.
+    /// Serializes reconciles: two interleaved passes could both see a contact
+    /// as unlinked and export it twice. Each caller chains its own pass after
+    /// the in-flight one so it never acts on a stale plan. Chaining (instead
+    /// of polling the in-flight task in a loop) matters: awaiting an
+    /// already-completed task can resume without suspending, so a polling
+    /// loop can spin on the main actor and deadlock the app.
+    private var inFlightReconcile: Task<Summary, Never>?
+
+    /// Sync-back import followed by a full export diff of app contacts
+    /// against the link store; runs after every relay sync, on first enable,
+    /// and when the system Contacts database changes.
     @discardableResult
     func reconcileAll() async -> Summary {
+        let previous = inFlightReconcile
+        let task = Task { () -> Summary in
+            _ = await previous?.value
+            return await performReconcile()
+        }
+        inFlightReconcile = task
+        defer { if inFlightReconcile == task { inFlightReconcile = nil } }
+        return await task.value
+    }
+
+    private func performReconcile() async -> Summary {
         var summary = Summary()
         guard settings.exportToSystemContactsEnabled, isAuthorized else { return summary }
+        let cards = (try? store.listAll()) ?? []
+        await adoptMatchingCards(cards, summary: &summary)
+        await importNewCards(cards, summary: &summary)
         let contacts = (try? await contactDAO.listAll()) ?? []
-        let plan = SystemContactsDiff.plan(contacts: contacts, links: linkStore.all())
+        let plan = SystemContactsDiff.plan(
+            contacts: contacts,
+            links: linkStore.all(),
+            existingCardIdentifiers: Set(cards.map(\.identifier))
+        )
 
         for link in plan.deletes {
             deleteLinked(link, summary: &summary)
@@ -159,8 +202,9 @@ actor SystemContactsExporter {
 
         if summary != Summary() {
             Log.sync.info("""
-            System contacts export: \(summary.created) created, \
+            System contacts sync: \(summary.created) created, \
             \(summary.updated) updated, \(summary.deleted) deleted, \
+            \(summary.imported) imported, \(summary.adopted) adopted, \
             \(summary.failed) failed
             """)
         }
@@ -173,6 +217,10 @@ actor SystemContactsExporter {
         var summary = Summary()
         if let link = linkStore.link(localId: contact.localId) {
             upsertLinked(contact, cnIdentifier: link.cnIdentifier, summary: &summary)
+        } else if let match = adoptableCard(for: contact) {
+            // Same person already has a card on this device: update it in
+            // place instead of creating a junk duplicate.
+            upsertLinked(contact, cnIdentifier: match.identifier, summary: &summary)
         } else {
             create(contact, summary: &summary)
         }
@@ -187,18 +235,106 @@ actor SystemContactsExporter {
     }
 
     /// Destructive cleanup from Preferences: removes every card the app
-    /// created and forgets the links. Works with the toggle off.
+    /// created and forgets the links. Cards the user created in Contacts.app
+    /// (imports) are kept and baselined so they aren't re-imported. Works
+    /// with the toggle off.
     @discardableResult
-    func removeAllExported() async -> Int {
+    func removeAllExported() -> Int {
         guard isAuthorized else { return 0 }
         var summary = Summary()
         for link in linkStore.all() {
-            deleteLinked(link, summary: &summary)
+            if link.imported {
+                baselineStore.add(link.cnIdentifier)
+                linkStore.remove(localId: link.localId)
+            } else {
+                deleteLinked(link, summary: &summary)
+            }
         }
         return summary.deleted
     }
 
     // MARK: - Private
+
+    /// De-dupe pass: an unlinked app contact and an unlinked card that match
+    /// (same email, else same name+phone) are the same person — link them
+    /// instead of exporting or importing a duplicate. This is what prevents
+    /// junk duplicates when the relay and the device both already know a
+    /// contact on first sync. The distantPast timestamp makes the export
+    /// pass refresh the card's mapped fields from the app contact.
+    private func adoptMatchingCards(_ cards: [CNContact], summary: inout Summary) async {
+        let links = linkStore.all()
+        let linkedIdentifiers = Set(links.map(\.cnIdentifier))
+        let linkedLocalIds = Set(links.map(\.localId))
+
+        // A card is indexed under every identity it can match (one per email,
+        // else name+phone); `consumed` keeps adoption one-to-one.
+        var candidates: [String: [CNContact]] = [:]
+        for card in cards where !linkedIdentifiers.contains(card.identifier) {
+            for key in SystemContactMapper.matchKeys(for: card) {
+                candidates[key, default: []].append(card)
+            }
+        }
+        guard !candidates.isEmpty else { return }
+        var consumed = Set<String>()
+
+        let contacts = (try? await contactDAO.listAll()) ?? []
+        for contact in contacts where !linkedLocalIds.contains(contact.localId) {
+            guard let key = SystemContactMapper.matchKey(for: contact),
+                  let card = candidates[key]?.first(where: { !consumed.contains($0.identifier) })
+            else { continue }
+            consumed.insert(card.identifier)
+            linkStore.upsert(SystemContactLink(
+                localId: contact.localId,
+                uid: contact.uid,
+                cnIdentifier: card.identifier,
+                exportedUpdatedAt: .distantPast
+            ))
+            summary.adopted += 1
+        }
+    }
+
+    /// Single-contact flavor of the adoption pass, for the incremental save
+    /// hook: the first unlinked card matching this contact's identity.
+    private func adoptableCard(for contact: Contact) -> CNContact? {
+        guard let key = SystemContactMapper.matchKey(for: contact) else { return nil }
+        let linkedIdentifiers = Set(linkStore.all().map(\.cnIdentifier))
+        let cards = (try? store.listAll()) ?? []
+        return cards.first {
+            !linkedIdentifiers.contains($0.identifier)
+                && SystemContactMapper.matchKeys(for: $0).contains(key)
+        }
+    }
+
+    /// Cards added in Contacts.app after sync was enabled become app contacts
+    /// queued (needsSync) for the next relay push. The very first pass only
+    /// captures the baseline, so enabling sync doesn't import the user's
+    /// whole pre-existing address book.
+    private func importNewCards(_ cards: [CNContact], summary: inout Summary) async {
+        guard baselineStore.isCaptured else {
+            baselineStore.capture(identifiers: cards.map(\.identifier))
+            return
+        }
+        let linked = Set(linkStore.all().map(\.cnIdentifier))
+        let baseline = baselineStore.identifiers()
+        for card in cards
+        where !linked.contains(card.identifier) && !baseline.contains(card.identifier) {
+            let contact = SystemContactMapper.contact(from: card)
+            do {
+                try await contactDAO.upsert(contacts: [contact])
+                linkStore.upsert(SystemContactLink(
+                    localId: contact.localId,
+                    uid: nil,
+                    cnIdentifier: card.identifier,
+                    exportedUpdatedAt: contact.updatedAt,
+                    imported: true
+                ))
+                summary.imported += 1
+            } catch {
+                summary.failed += 1
+                Log.sync.error("System contacts import failed: \(error.localizedDescription)")
+            }
+        }
+    }
 
     private func create(_ contact: Contact, summary: inout Summary) {
         let cn = SystemContactMapper.makeContact(from: contact)

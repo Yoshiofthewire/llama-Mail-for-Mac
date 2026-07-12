@@ -8,6 +8,11 @@
 
 import Foundation
 import Observation
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 
 @Observable
 @MainActor
@@ -17,10 +22,26 @@ final class SettingsViewModel {
     private let desktopSessionStore: DesktopSessionStore
     private let mailRepository: MailRepository
     private let keywordRepository: KeywordRepository
+    private let contactsSettingsStore: ContactsSettingsStore
+    private let systemContactsExporter: SystemContactsExporter
 
     var systemNotificationsEnabled: Bool {
         didSet { pushSettingsStore.systemNotificationsEnabled = systemNotificationsEnabled }
     }
+
+    /// "Export to Apple Contacts" toggle. Enabling prompts for Contacts
+    /// access first; when denied the toggle flips back with guidance.
+    var exportContactsToSystem: Bool {
+        didSet {
+            guard !suppressExportToggle, exportContactsToSystem != oldValue else { return }
+            Task { await handleExportToggleChanged(exportContactsToSystem) }
+        }
+    }
+    /// Re-entrancy guard so flipping the toggle back after a denial doesn't
+    /// trigger another handleExportToggleChanged pass.
+    @ObservationIgnored private var suppressExportToggle = false
+    private(set) var contactsExportDenied = false
+    private(set) var hasExportedContacts = false
 
     private(set) var statusMessage: String?
     private(set) var keywordSettings: [KeywordSetting] = []
@@ -30,14 +51,19 @@ final class SettingsViewModel {
         pushSettingsStore: PushSettingsStore,
         desktopSessionStore: DesktopSessionStore,
         mailRepository: MailRepository,
-        keywordRepository: KeywordRepository
+        keywordRepository: KeywordRepository,
+        contactsSettingsStore: ContactsSettingsStore,
+        systemContactsExporter: SystemContactsExporter
     ) {
         self.securePairingStore = securePairingStore
         self.pushSettingsStore = pushSettingsStore
         self.desktopSessionStore = desktopSessionStore
         self.mailRepository = mailRepository
         self.keywordRepository = keywordRepository
+        self.contactsSettingsStore = contactsSettingsStore
+        self.systemContactsExporter = systemContactsExporter
         systemNotificationsEnabled = pushSettingsStore.systemNotificationsEnabled
+        exportContactsToSystem = contactsSettingsStore.exportToSystemContactsEnabled
     }
 
     // MARK: - Pairing status
@@ -85,6 +111,64 @@ final class SettingsViewModel {
     func forgetDesktopPairing() {
         try? desktopSessionStore.clear()
         statusMessage = "Desktop pairing removed"
+    }
+
+    // MARK: - Apple Contacts export
+
+    func refreshContactsExportState() {
+        contactsExportDenied = systemContactsExporter.isDenied
+        hasExportedContacts = systemContactsExporter.hasExportedContacts()
+    }
+
+    /// "Re-export Missing Contacts": runs a full reconcile pass, which
+    /// recreates cards that were deleted outside the app (removed in
+    /// Contacts.app, or lost with an account change).
+    func reexportMissingContacts() async {
+        let summary = await systemContactsExporter.reconcileAll()
+        hasExportedContacts = systemContactsExporter.hasExportedContacts()
+        statusMessage = "Re-exported \(summary.created + summary.updated) contact(s) to Apple Contacts"
+    }
+
+    /// Removes every card the app created in Apple Contacts and forgets the
+    /// links; separate from the toggle, which keeps exported cards.
+    func removeExportedContacts() {
+        let removed = systemContactsExporter.removeAllExported()
+        hasExportedContacts = systemContactsExporter.hasExportedContacts()
+        statusMessage = "Removed \(removed) exported contact(s) from Apple Contacts"
+    }
+
+    func openContactsPrivacySettings() {
+        #if os(macOS)
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+        #elseif os(iOS)
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+        #endif
+    }
+
+    private func handleExportToggleChanged(_ enabled: Bool) async {
+        guard enabled else {
+            contactsSettingsStore.exportToSystemContactsEnabled = false
+            statusMessage = "Contacts export turned off — exported cards were kept."
+            return
+        }
+        guard await systemContactsExporter.requestAccessIfNeeded() else {
+            suppressExportToggle = true
+            exportContactsToSystem = false
+            suppressExportToggle = false
+            contactsExportDenied = true
+            statusMessage = "Contacts access is denied. Allow llama Mail under "
+                + "System Settings > Privacy & Security > Contacts."
+            return
+        }
+        contactsExportDenied = false
+        contactsSettingsStore.exportToSystemContactsEnabled = true
+        let summary = await systemContactsExporter.reconcileAll()
+        hasExportedContacts = systemContactsExporter.hasExportedContacts()
+        statusMessage = "Exported \(summary.created + summary.updated) contact(s) to Apple Contacts"
     }
 
     // MARK: - Keyword visibility (spec §9 KeywordSettingsView)

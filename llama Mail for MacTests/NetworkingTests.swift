@@ -222,6 +222,9 @@ private let validPairingLink = URL(
             #expect(body.contains(#""subscriberId":"u1""#))
             #expect(body.contains(#""pairingToken":"p1""#))
             #expect(body.contains(#""deviceToken":"apns-token""#))
+            // deviceName is what the server's paired-device list displays;
+            // without it the UI falls back to the platform string.
+            #expect(body.contains(#""deviceName":""#))
         }
         let outcome = await NativeRegistrationClient(httpClient: client)
             .register(deviceToken: "apns-token", params: params)

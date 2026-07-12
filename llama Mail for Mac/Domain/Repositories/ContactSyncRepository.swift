@@ -27,19 +27,24 @@ final class ContactSyncRepository {
     private let cursorStore: ContactCursorStore
     private let pendingDeletesStore: ContactPendingDeletesStore
     private let securePairingStore: SecurePairingStore
+    /// Mirrors changes into the system Contacts database when enabled; nil in
+    /// tests that don't exercise the export.
+    private let systemContactsExporter: SystemContactsExporter?
 
     init(
         client: ContactSyncClient,
         contactDAO: ContactDAO,
         cursorStore: ContactCursorStore,
         pendingDeletesStore: ContactPendingDeletesStore,
-        securePairingStore: SecurePairingStore
+        securePairingStore: SecurePairingStore,
+        systemContactsExporter: SystemContactsExporter? = nil
     ) {
         self.client = client
         self.contactDAO = contactDAO
         self.cursorStore = cursorStore
         self.pendingDeletesStore = pendingDeletesStore
         self.securePairingStore = securePairingStore
+        self.systemContactsExporter = systemContactsExporter
     }
 
     // MARK: - Local CRUD
@@ -54,6 +59,7 @@ final class ContactSyncRepository {
         dirty.needsSync = true
         dirty.updatedAt = Date()
         try await contactDAO.upsert(contacts: [dirty])
+        await systemContactsExporter?.exportUpsert(dirty)
     }
 
     /// Deletes locally now; synced contacts get a tombstone so the delete
@@ -66,12 +72,33 @@ final class ContactSyncRepository {
             // Never reached the server; deleting locally is enough.
             try await contactDAO.deleteLocal(localId: contact.localId)
         }
+        await systemContactsExporter?.exportDelete(localId: contact.localId)
     }
 
     // MARK: - Sync
 
+    /// Serializes syncs. Overlapping calls (manual Sync button, the contacts
+    /// change monitor, foreground triggers) would each read the same pending
+    /// set and push it twice, duplicating contacts server-side. Each caller
+    /// chains its own full pass after the in-flight one. Chaining (instead
+    /// of polling the in-flight task in a loop) matters: awaiting an
+    /// already-completed task can resume without suspending, so a polling
+    /// loop can spin on the main actor and deadlock the app.
+    private var inFlightSync: Task<ContactSyncSummary, Error>?
+
     @discardableResult
     func sync() async throws -> ContactSyncSummary {
+        let previous = inFlightSync
+        let task = Task { () throws -> ContactSyncSummary in
+            _ = try? await previous?.value
+            return try await performSync()
+        }
+        inFlightSync = task
+        defer { if inFlightSync == task { inFlightSync = nil } }
+        return try await task.value
+    }
+
+    private func performSync() async throws -> ContactSyncSummary {
         guard let pairing = try securePairingStore.loadPairing() else {
             throw ContactSyncError.notPaired
         }
@@ -135,6 +162,11 @@ final class ContactSyncRepository {
         try await contactDAO.clearNeedsSync(localIds: pending.map(\.localId))
         pendingDeletesStore.clear()
         cursorStore.advance(to: response.cursor)
+
+        // tooOld returns early above on purpose: links survive the wipe and
+        // this reconcile re-links re-pulled contacts by uid instead of
+        // deleting and recreating their system cards.
+        await systemContactsExporter?.reconcileAll()
 
         return ContactSyncSummary(
             pushed: changes.count,

@@ -16,7 +16,9 @@ struct SettingsView: View {
         pushSettingsStore: SingletonGraph.shared.pushSettingsStore,
         desktopSessionStore: SingletonGraph.shared.desktopSessionStore,
         mailRepository: SingletonGraph.shared.mailRepository,
-        keywordRepository: SingletonGraph.shared.keywordRepository
+        keywordRepository: SingletonGraph.shared.keywordRepository,
+        contactsSettingsStore: SingletonGraph.shared.contactsSettingsStore,
+        systemContactsExporter: SingletonGraph.shared.systemContactsExporter
     )
     @State private var showPairingSheet = false
 
@@ -80,6 +82,32 @@ struct SettingsView: View {
             }
             .listRowBackground(theme.panel)
 
+            Section {
+                Toggle("Sync with Apple Contacts", isOn: $viewModel.exportContactsToSystem)
+                if viewModel.contactsExportDenied {
+                    Text("Contacts access is denied for llama Mail.")
+                        .font(AppFont.ui(13))
+                        .foregroundStyle(theme.ink.opacity(0.8))
+                    Button("Open Settings") { viewModel.openContactsPrivacySettings() }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+                if viewModel.exportContactsToSystem {
+                    Button("Re-export Missing Contacts") {
+                        Task { await viewModel.reexportMissingContacts() }
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
+                if viewModel.hasExportedContacts {
+                    Button("Remove Exported Contacts") { viewModel.removeExportedContacts() }
+                        .buttonStyle(DangerButtonStyle())
+                }
+            } header: {
+                Text("Contacts")
+            } footer: {
+                Text("Contacts sync both ways: new cards you add in Apple Contacts are imported, matching contacts (same email) are linked instead of duplicated, and only cards created or imported by llama Mail are ever updated or removed.")
+            }
+            .listRowBackground(theme.panel)
+
             Section("About") {
                 LabeledContent(
                     "Version",
@@ -100,6 +128,7 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(theme.bg)
         .navigationTitle("Settings")
+        .onAppear { viewModel.refreshContactsExportState() }
         .sheet(isPresented: $showPairingSheet) {
             PushPairingView(initialParams: nil)
                 .environment(\.theme, theme)

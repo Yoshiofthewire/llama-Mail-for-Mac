@@ -9,6 +9,10 @@
 import Foundation
 
 struct SendEmailUseCase {
+    /// Total decoded attachment budget per message — mirrors the backend's
+    /// maxMailAttachmentBytes so oversized sends fail before the network.
+    static let maxAttachmentBytes = 25 << 20
+
     private let repository: MailRepository
 
     init(repository: MailRepository) {
@@ -24,6 +28,10 @@ struct SendEmailUseCase {
         }
         guard recipients.allSatisfy(Self.looksLikeEmailAddress) else {
             return .invalid("Check the recipient addresses")
+        }
+        let attachmentBytes = email.attachments.reduce(0) { $0 + $1.data.count }
+        guard attachmentBytes <= Self.maxAttachmentBytes else {
+            return .invalid("Attachments too large (max 25 MB total)")
         }
         return await repository.send(email)
     }

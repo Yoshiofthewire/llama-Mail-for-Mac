@@ -26,7 +26,7 @@ struct MacRootView: View {
     private var contactsViewModel: ContactsViewModel { SingletonGraph.shared.contactsViewModel }
 
     @State private var section: MacSection? = .inbox(keyword: nil)
-    @State private var selectedEmail: Email?
+    @State private var selectedEmails: Set<Email> = []
     @State private var selectedContact: Contact?
     /// When off, the email preview pane is hidden and reading happens in
     /// pop-out windows (double-click). Contacts always keep their detail pane.
@@ -58,9 +58,6 @@ struct MacRootView: View {
         }
         .tint(theme.accent)
         .environment(\.theme, theme)
-        .sheet(isPresented: $router.composeRequested) {
-            ComposeView().environment(\.theme, theme)
-        }
         .sheet(item: $router.pairingParams) { params in
             PushPairingView(initialParams: params).environment(\.theme, theme)
         }
@@ -82,12 +79,24 @@ struct MacRootView: View {
         .onChange(of: section) {
             switch section {
             case .inbox(let keyword):
+                selectedEmails = []
                 Task { await inboxViewModel.selectFolder(StandardFolder.inbox, tab: keyword) }
             case .folder(let name):
+                selectedEmails = []
                 Task { await inboxViewModel.selectFolder(name) }
             case .contacts, nil:
                 break
             }
+        }
+        .onChange(of: inboxViewModel.filteredEmails) {
+            // Re-point the selection at the refreshed values (Email is
+            // Hashable by value, so a read-flag change would otherwise
+            // silently deselect) and drop emails that left the list.
+            let byId = Dictionary(
+                inboxViewModel.filteredEmails.map { ($0.serverId, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            selectedEmails = Set(selectedEmails.compactMap { byId[$0.serverId] })
         }
     }
 
@@ -175,9 +184,9 @@ struct MacRootView: View {
                 )
                 .frame(maxHeight: .infinity, alignment: .top)
             } else {
-                List(inboxViewModel.filteredEmails, selection: $selectedEmail) { email in
+                List(inboxViewModel.filteredEmails, selection: $selectedEmails) { email in
                     EmailListRow(email: email)
-                        .draggable(email.serverId)
+                        .draggable(dragPayload(for: email))
                         .tag(email)
                         .listRowBackground(theme.bg)
                         .listRowSeparatorTint(theme.line)
@@ -190,8 +199,17 @@ struct MacRootView: View {
                     } label: {
                         Label("Open in New Window", systemImage: "macwindow.badge.plus")
                     }
+                    Divider()
+                    Button(role: .destructive) {
+                        deleteEmails(selection)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
                 } primaryAction: { selection in
                     openInNewWindows(selection)
+                }
+                .onDeleteCommand {
+                    deleteEmails(selectedEmails)
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -208,7 +226,7 @@ struct MacRootView: View {
             }
             ToolbarItem {
                 Button {
-                    router.composeRequested = true
+                    openWindow(id: "compose")
                 } label: {
                     Label("Compose", systemImage: "square.and.pencil")
                 }
@@ -278,22 +296,28 @@ struct MacRootView: View {
     private func detailPane(theme: ThemePalette) -> some View {
         switch section ?? .inbox(keyword: nil) {
         case .inbox, .folder:
-            if let selectedEmail {
-                EmailDetailView(email: selectedEmail, inboxViewModel: inboxViewModel)
+            if let email = singleSelectedEmail {
+                EmailDetailView(email: email, inboxViewModel: inboxViewModel)
+                    .id(email.serverId) // re-run markRead when the selection changes
                     .toolbar {
                         ToolbarItem {
                             Button {
-                                openWindow(id: "email", value: selectedEmail.serverId)
+                                openWindow(id: "email", value: email.serverId)
                             } label: {
                                 Label("Open in New Window", systemImage: "macwindow.badge.plus")
                             }
                         }
                     }
             } else {
-                EmptyStateView(message: "Select an email", systemImage: "envelope.open")
-                    .frame(maxWidth: 340)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(theme.bg)
+                EmptyStateView(
+                    message: selectedEmails.count > 1
+                        ? "\(selectedEmails.count) emails selected"
+                        : "Select an email",
+                    systemImage: "envelope.open"
+                )
+                .frame(maxWidth: 340)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(theme.bg)
             }
         case .contacts:
             if let selectedContact {
@@ -309,6 +333,27 @@ struct MacRootView: View {
     }
 
     // MARK: - Helpers
+
+    /// The email shown in the preview pane — only when exactly one is selected.
+    private var singleSelectedEmail: Email? {
+        selectedEmails.count == 1 ? selectedEmails.first : nil
+    }
+
+    /// Dragging a row that's part of the selection carries the whole
+    /// selection. ponytail: ids are newline-joined into one plain-text
+    /// payload; a custom Transferable UTType is the cleaner v2.
+    private func dragPayload(for email: Email) -> String {
+        let ids = selectedEmails.contains(email)
+            ? selectedEmails.map(\.serverId)
+            : [email.serverId]
+        return ids.joined(separator: "\n")
+    }
+
+    private func deleteEmails(_ emails: Set<Email>) {
+        guard !emails.isEmpty else { return }
+        selectedEmails.subtract(emails)
+        Task { await inboxViewModel.delete(serverIds: emails.map(\.serverId)) }
+    }
 
     private var currentInboxTitle: String {
         switch section ?? .inbox(keyword: nil) {
@@ -331,19 +376,43 @@ struct MacRootView: View {
         guard let messageId = router.pendingMessageId else { return }
         if let email = inboxViewModel.email(withServerId: messageId) {
             section = .inbox(keyword: nil)
-            selectedEmail = email
+            selectedEmails = [email]
             router.pendingMessageId = nil
         }
     }
 }
 
+/// Accepts dragged email server ids (newline-joined, see `dragPayload`) and
+/// moves them to `folder`, highlighting the row while a drag hovers over it.
+private struct MoveDropTarget: ViewModifier {
+    let folder: String
+    let viewModel: InboxViewModel
+
+    @Environment(\.theme) private var theme
+    @State private var isTargeted = false
+
+    func body(content: Content) -> some View {
+        content
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isTargeted ? theme.accent.opacity(0.25) : Color.clear)
+            )
+            .dropDestination(for: String.self) { payloads, _ in
+                let serverIds = payloads.flatMap {
+                    $0.split(separator: "\n").map(String.init)
+                }
+                guard !serverIds.isEmpty else { return false }
+                Task { await viewModel.move(serverIds: serverIds, to: folder) }
+                return true
+            } isTargeted: { targeted in
+                isTargeted = targeted
+            }
+    }
+}
+
 private extension View {
-    /// Accepts dragged email server ids and moves them to `folder`.
     func moveDropTarget(_ folder: String, viewModel: InboxViewModel) -> some View {
-        dropDestination(for: String.self) { serverIds, _ in
-            Task { await viewModel.move(serverIds: serverIds, to: folder) }
-            return true
-        }
+        modifier(MoveDropTarget(folder: folder, viewModel: viewModel))
     }
 }
 

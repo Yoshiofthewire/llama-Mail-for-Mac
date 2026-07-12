@@ -29,8 +29,9 @@ final class SystemContactsChangeMonitor {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            guard let self else { return }
             Task { @MainActor in
-                self?.reconcileSoon()
+                self.reconcileSoon()
             }
         }
     }
@@ -41,7 +42,7 @@ final class SystemContactsChangeMonitor {
         let summary = await exporter.reconcileAll()
         if summary.imported > 0 {
             // Imported contacts are queued (needsSync); push them right away.
-            try? await repository.sync()
+            _ = try? await repository.sync()
         }
     }
 

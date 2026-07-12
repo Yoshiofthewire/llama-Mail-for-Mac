@@ -35,6 +35,71 @@ private let validDesktopLink = URL(
     string: "llamalabels://desktop-pair?code=\(validCode)&srv=https://relay.example.com"
 )!
 
+// MARK: - Register dedupe (one registration per code)
+
+@MainActor
+@Suite struct DesktopPairingServiceDedupeTests {
+    private final class RequestCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func increment() { lock.lock(); value += 1; lock.unlock() }
+        var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+    }
+
+    private func makeService(counter: RequestCounter) -> DesktopPairingService {
+        let json = """
+        {"ok": true, "sessionToken": "jwt-token", "expiresIn": 86400, \
+        "userId": "u1", "userEmail": "user@example.com"}
+        """
+        let client = HTTPClient { request in
+            counter.increment()
+            try? await Task.sleep(for: .milliseconds(10))
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (Data(json.utf8), response)
+        }
+        return DesktopPairingService(
+            client: DesktopRegistrationClient(httpClient: client),
+            sessionStore: DesktopSessionStore(
+                keychain: KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
+            )
+        )
+    }
+
+    private var params: DesktopPairingParams {
+        DesktopPairingParams(code: validCode, srv: "https://relay.example.com")
+    }
+
+    /// The deep link is delivered to every open window and each auto-pairs;
+    /// concurrent calls with one code must collapse into one registration.
+    @Test func concurrentPairsWithSameCodeRegisterOnce() async {
+        let counter = RequestCounter()
+        let service = makeService(counter: counter)
+        async let first = service.pair(params: params)
+        async let second = service.pair(params: params)
+        let outcomes = await [first, second]
+        #expect(counter.count == 1)
+        let expected = DesktopRegistrationOutcome.success(DesktopRegistrationResponse(
+            ok: true, sessionToken: "jwt-token", expiresIn: 86400,
+            userId: "u1", userEmail: "user@example.com"
+        ))
+        #expect(outcomes == [expected, expected])
+    }
+
+    @Test func repeatPairWithSameCodeReusesOutcome() async {
+        let counter = RequestCounter()
+        let service = makeService(counter: counter)
+        let first = await service.pair(params: params)
+        let second = await service.pair(params: params)
+        #expect(counter.count == 1)
+        #expect(first == second)
+    }
+}
+
 // MARK: - Deep-link parsing
 
 @Suite struct DesktopPairingLinkParserTests {
