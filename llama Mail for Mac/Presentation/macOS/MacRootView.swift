@@ -200,6 +200,28 @@ struct MacRootView: View {
                         Label("Open in New Window", systemImage: "macwindow.badge.plus")
                     }
                     Divider()
+                    Button {
+                        runMailAction(on: selection) { await inboxViewModel.archive(serverIds: $0) }
+                    } label: {
+                        Label("Archive", systemImage: "archivebox")
+                    }
+                    Menu {
+                        ForEach(inboxViewModel.moveDestinations, id: \.self) { destination in
+                            Button(StandardFolder.displayName(destination)) {
+                                runMailAction(on: selection) {
+                                    await inboxViewModel.move(serverIds: $0, to: destination)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Move To", systemImage: "folder")
+                    }
+                    Button {
+                        runMailAction(on: selection) { await inboxViewModel.markJunk(serverIds: $0) }
+                    } label: {
+                        Label("Move to Junk", systemImage: "xmark.bin")
+                    }
+                    Divider()
                     Button(role: .destructive) {
                         deleteEmails(selection)
                     } label: {
@@ -350,9 +372,17 @@ struct MacRootView: View {
     }
 
     private func deleteEmails(_ emails: Set<Email>) {
+        runMailAction(on: emails) { await inboxViewModel.delete(serverIds: $0) }
+    }
+
+    /// Deselects the affected rows, then runs a bulk mail operation.
+    private func runMailAction(
+        on emails: Set<Email>,
+        _ operation: @escaping ([String]) async -> Void
+    ) {
         guard !emails.isEmpty else { return }
         selectedEmails.subtract(emails)
-        Task { await inboxViewModel.delete(serverIds: emails.map(\.serverId)) }
+        Task { await operation(emails.map(\.serverId)) }
     }
 
     private var currentInboxTitle: String {

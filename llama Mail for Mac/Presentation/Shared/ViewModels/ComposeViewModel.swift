@@ -36,8 +36,14 @@ final class ComposeViewModel {
     private(set) var errorMessage: String?
     private(set) var didSend = false
 
-    init(sendEmail: SendEmailUseCase) {
+    init(sendEmail: SendEmailUseCase, draft: ComposeDraft? = nil) {
         self.sendEmail = sendEmail
+        if let draft {
+            to = draft.to
+            cc = draft.cc
+            subject = draft.subject
+            body = AttributedString(draft.body)
+        }
     }
 
     var attachmentTotalBytes: Int {
@@ -115,5 +121,131 @@ final class ComposeViewModel {
         field.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+}
+
+// MARK: - Reply / Reply All / Forward drafts
+
+/// Prefilled compose state built from an existing email. Codable + Hashable
+/// so macOS can pass it as a "compose" WindowGroup value; Identifiable so
+/// iOS can present it with sheet(item:).
+struct ComposeDraft: Codable, Hashable, Identifiable, Sendable {
+    var id = UUID()
+    var to = ""
+    var cc = ""
+    var subject = ""
+    var body = ""
+
+    static func reply(to email: Email) -> ComposeDraft {
+        ComposeDraft(
+            to: email.senderEmail.isEmpty ? email.senderName : email.senderEmail,
+            subject: prefixed("Re:", email.subject),
+            body: quotedBody(of: email)
+        )
+    }
+
+    /// Reply to the sender, Cc'ing everyone else on the original To/Cc —
+    /// minus the sender (already in To) and our own address (`ownAddress`,
+    /// the pairing's sub).
+    static func replyAll(to email: Email, ownAddress: String?) -> ComposeDraft {
+        var draft = reply(to: email)
+        var excluded = [email.senderEmail.lowercased()]
+        if let ownAddress { excluded.append(ownAddress.lowercased()) }
+        var seen = Set<String>()
+        let others = (addresses(in: email.sentTo) + addresses(in: email.cc)).filter {
+            !excluded.contains($0.lowercased()) && seen.insert($0.lowercased()).inserted
+        }
+        draft.cc = others.joined(separator: ", ")
+        return draft
+    }
+
+    static func forward(_ email: Email) -> ComposeDraft {
+        let sender = email.senderName == email.senderEmail || email.senderName.isEmpty
+            ? email.senderEmail
+            : "\(email.senderName) <\(email.senderEmail)>"
+        var header = """
+        ---------- Forwarded message ----------
+        From: \(sender)
+        Date: \(email.receivedAt.formatted(date: .abbreviated, time: .shortened))
+        Subject: \(email.subject)
+        """
+        if !email.sentTo.isEmpty {
+            header += "\nTo: \(email.sentTo)"
+        }
+        return ComposeDraft(
+            subject: prefixed("Fwd:", email.subject),
+            body: "\n\n\(header)\n\n\(plainText(email.body))"
+        )
+    }
+
+    // MARK: - Helpers
+
+    /// "Re:"/"Fwd:" prefix, skipped when the subject already carries it.
+    private static func prefixed(_ prefix: String, _ subject: String) -> String {
+        let trimmed = subject.trimmingCharacters(in: .whitespaces)
+        if trimmed.lowercased().hasPrefix(prefix.lowercased()) {
+            return trimmed
+        }
+        return trimmed.isEmpty ? prefix : "\(prefix) \(trimmed)"
+    }
+
+    /// "On {date}, {sender} wrote:" attribution plus the original body,
+    /// each line "> "-quoted, after two blank lines for the reply text.
+    private static func quotedBody(of email: Email) -> String {
+        let sender = email.senderName.isEmpty ? email.senderEmail : email.senderName
+        let date = email.receivedAt.formatted(date: .abbreviated, time: .shortened)
+        let quoted = plainText(email.body)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "> \($0)" }
+            .joined(separator: "\n")
+        return "\n\nOn \(date), \(sender) wrote:\n\(quoted)"
+    }
+
+    /// Bare addresses from a comma-joined header string whose entries may be
+    /// "Name <addr>" or bare addresses.
+    private static func addresses(in header: String) -> [String] {
+        header.split(separator: ",").compactMap { entry in
+            let trimmed = entry.trimmingCharacters(in: .whitespaces)
+            if let open = trimmed.lastIndex(of: "<"),
+               let close = trimmed.lastIndex(of: ">"),
+               open < close {
+                return String(trimmed[trimmed.index(after: open)..<close])
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            return trimmed.contains("@") ? trimmed : nil
+        }
+    }
+
+    /// Reduces an HTML body to quotable plain text (the compose editor is
+    /// text, not a web view): tags stripped, block ends → newlines, common
+    /// entities decoded. Plain bodies pass through untouched.
+    static func plainText(_ body: String) -> String {
+        guard body.range(of: "<[a-zA-Z!/]", options: .regularExpression) != nil else {
+            return body
+        }
+        var text = body
+        for pattern in ["(?is)<(style|script|head)\\b.*?</\\1>", "(?s)<!--.*?-->"] {
+            text = text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        text = text.replacingOccurrences(
+            of: "(?i)<br\\b[^>]*>|</(p|div|tr|li|h[1-6]|blockquote|table)>",
+            with: "\n",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        let entities = [
+            "&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">",
+            "&quot;": "\"", "&#39;": "'", "&apos;": "'",
+        ]
+        for (entity, character) in entities {
+            text = text.replacingOccurrences(of: entity, with: character)
+        }
+        // Collapse the newline runs left behind by nested block markup.
+        text = text.replacingOccurrences(
+            of: "\\n[ \\t]*(\\n[ \\t]*)+",
+            with: "\n\n",
+            options: .regularExpression
+        )
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -17,6 +17,10 @@ final class EmailEntity {
     var senderEmail: String
     var subject: String
     var body: String
+    /// Raw To/Cc header strings (see Email.sentTo/cc); default "" keeps
+    /// stores created before these columns migrating cleanly.
+    var sentTo: String = ""
+    var cc: String = ""
     var keywords: [String]
     var receivedAt: Date
     var read: Bool
@@ -30,6 +34,8 @@ final class EmailEntity {
         senderEmail: String,
         subject: String,
         body: String,
+        sentTo: String = "",
+        cc: String = "",
         keywords: [String],
         receivedAt: Date,
         read: Bool,
@@ -42,6 +48,8 @@ final class EmailEntity {
         self.senderEmail = senderEmail
         self.subject = subject
         self.body = body
+        self.sentTo = sentTo
+        self.cc = cc
         self.keywords = keywords
         self.receivedAt = receivedAt
         self.read = read
@@ -61,6 +69,8 @@ extension EmailEntity {
             senderEmail: email.senderEmail,
             subject: email.subject,
             body: email.body,
+            sentTo: email.sentTo,
+            cc: email.cc,
             keywords: email.keywords.sorted(),
             receivedAt: email.receivedAt,
             read: email.read,
@@ -76,6 +86,8 @@ extension EmailEntity {
             senderEmail: senderEmail,
             subject: subject,
             body: body,
+            sentTo: sentTo,
+            cc: cc,
             keywords: Set(keywords),
             receivedAt: receivedAt,
             read: read,

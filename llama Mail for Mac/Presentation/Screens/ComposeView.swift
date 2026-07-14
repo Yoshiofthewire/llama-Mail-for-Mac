@@ -18,11 +18,17 @@ struct ComposeView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.fontResolutionContext) private var fontResolutionContext
 
-    @State private var viewModel = ComposeViewModel(
-        sendEmail: SingletonGraph.shared.sendEmailUseCase
-    )
+    @State private var viewModel: ComposeViewModel
     @State private var selection = AttributedTextSelection()
     @State private var showFileImporter = false
+
+    /// `draft` prefills reply/reply-all/forward compositions.
+    init(draft: ComposeDraft? = nil) {
+        _viewModel = State(initialValue: ComposeViewModel(
+            sendEmail: SingletonGraph.shared.sendEmailUseCase,
+            draft: draft
+        ))
+    }
 
     var body: some View {
 #if os(macOS)
@@ -173,33 +179,26 @@ struct ComposeView: View {
 
     // MARK: - Toolbar
 
+    /// iOS keeps the nav bar to Cancel/title/Send (everything inline
+    /// truncates the title and drops the attach button); formatting and
+    /// attach live in the bottom bar instead.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
             Button("Cancel") { dismiss() }
         }
+#if os(macOS)
         ToolbarItemGroup {
-            ControlGroup {
-                Toggle(isOn: boldBinding) {
-                    Label("Bold", systemImage: "bold")
-                }
-                .keyboardShortcut("b")
-                Toggle(isOn: italicBinding) {
-                    Label("Italic", systemImage: "italic")
-                }
-                .keyboardShortcut("i")
-                Toggle(isOn: underlineBinding) {
-                    Label("Underline", systemImage: "underline")
-                }
-                .keyboardShortcut("u")
-            }
-            Button {
-                showFileImporter = true
-            } label: {
-                Label("Attach File", systemImage: "paperclip")
-            }
-            .help("Attach a file (max 25 MB total)")
+            formattingControls
+            attachButton
         }
+#else
+        ToolbarItemGroup(placement: .bottomBar) {
+            formattingControls
+            Spacer()
+            attachButton
+        }
+#endif
         ToolbarItem(placement: .confirmationAction) {
             Button {
                 Task { await viewModel.send(fontTraits: fontTraits) }
@@ -214,6 +213,32 @@ struct ComposeView: View {
             .disabled(viewModel.isSending)
             .help("Send (⌘↩)")
         }
+    }
+
+    private var formattingControls: some View {
+        ControlGroup {
+            Toggle(isOn: boldBinding) {
+                Label("Bold", systemImage: "bold")
+            }
+            .keyboardShortcut("b")
+            Toggle(isOn: italicBinding) {
+                Label("Italic", systemImage: "italic")
+            }
+            .keyboardShortcut("i")
+            Toggle(isOn: underlineBinding) {
+                Label("Underline", systemImage: "underline")
+            }
+            .keyboardShortcut("u")
+        }
+    }
+
+    private var attachButton: some View {
+        Button {
+            showFileImporter = true
+        } label: {
+            Label("Attach File", systemImage: "paperclip")
+        }
+        .help("Attach a file (max 25 MB total)")
     }
 
     // MARK: - Formatting

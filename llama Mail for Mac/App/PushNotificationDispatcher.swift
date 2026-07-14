@@ -65,7 +65,16 @@ final class PushNotificationDispatcher: NSObject {
     /// still parsed into in-app history.
     @discardableResult
     func requestAuthorization(center: UNUserNotificationCenter = .current()) async -> Bool {
-        (try? await center.requestAuthorization(options: [.alert, .badge, .sound])) ?? false
+        do {
+            let granted = try await center.requestAuthorization(options: [.alert, .badge, .sound])
+            if !granted {
+                Log.push.warning("Notification authorization not granted — pushes will be delivered silently")
+            }
+            return granted
+        } catch {
+            Log.push.error("Notification authorization request failed: \(error)")
+            return false
+        }
     }
 
     // MARK: - Incoming payloads

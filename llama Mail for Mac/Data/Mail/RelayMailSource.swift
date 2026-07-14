@@ -67,6 +67,8 @@ struct RelayEmailDTO: Decodable, Equatable, Sendable {
             senderEmail: address,
             subject: subject ?? "",
             body: body ?? "",
+            sentTo: sentTo ?? "",
+            cc: cc ?? "",
             keywords: keyword.isEmpty ? [] : [keyword],
             receivedAt: Self.parseUtc(atUtc) ?? Date(),
             read: (status ?? "unread").lowercased() != "unread",
@@ -112,10 +114,14 @@ struct RelayInboxResponse: Decodable, Sendable {
     var removed: [String]?
 
     /// Flattens the per-tab groups; each email keeps its tab as a keyword.
+    /// Sorted newest first — the per-tab dictionary has no stable iteration
+    /// order, and EmailDAO.getFolder reads the cache in the same order.
     func allEmails(folder: String) -> [Email] {
-        (byTab ?? [:]).flatMap { tab, emails in
-            emails.map { $0.toDomain(folder: folder, tab: tab) }
-        }
+        (byTab ?? [:])
+            .flatMap { tab, emails in
+                emails.map { $0.toDomain(folder: folder, tab: tab) }
+            }
+            .sorted { $0.receivedAt > $1.receivedAt }
     }
 }
 
@@ -263,28 +269,42 @@ final class RelayMailSource: MailSource {
     }
 
     func move(messageIds: [String], from mailbox: String, to targetMailbox: String) async throws {
-        _ = try await httpClient.post(
-            RelayActionResponse.self,
-            url: try endpoint("api/inbox/actions"),
-            query: auth.queryItems,
-            jsonBody: RelayActionRequest(
-                action: "move",
-                messageIds: messageIds,
-                mailbox: mailbox,
-                targetMailbox: targetMailbox
-            )
-        )
+        try await performAction("move", messageIds: messageIds, mailbox: mailbox, targetMailbox: targetMailbox)
     }
 
     func delete(messageIds: [String], mailbox: String) async throws {
+        try await performAction("delete", messageIds: messageIds, mailbox: mailbox)
+    }
+
+    func archive(messageIds: [String], mailbox: String) async throws {
+        try await performAction("archive", messageIds: messageIds, mailbox: mailbox)
+    }
+
+    func markSpam(messageIds: [String], mailbox: String) async throws {
+        try await performAction("spam", messageIds: messageIds, mailbox: mailbox)
+    }
+
+    func markRead(messageIds: [String], mailbox: String) async throws {
+        try await performAction("read", messageIds: messageIds, mailbox: mailbox)
+    }
+
+    /// POST /api/inbox/actions — the bulk verbs share one body shape
+    /// (Mobile_Mail_Relay.md; only "move" carries targetMailbox).
+    private func performAction(
+        _ action: String,
+        messageIds: [String],
+        mailbox: String,
+        targetMailbox: String? = nil
+    ) async throws {
         _ = try await httpClient.post(
             RelayActionResponse.self,
             url: try endpoint("api/inbox/actions"),
             query: auth.queryItems,
             jsonBody: RelayActionRequest(
-                action: "delete",
+                action: action,
                 messageIds: messageIds,
-                mailbox: mailbox
+                mailbox: mailbox,
+                targetMailbox: targetMailbox
             )
         )
     }

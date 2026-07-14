@@ -68,6 +68,16 @@ final class MailRepository {
         try await makeSource().delete(messageIds: messageIds, mailbox: mailbox)
     }
 
+    /// Archives messages via the relay (moved to the Archive folder).
+    func archive(messageIds: [String], from mailbox: String) async throws {
+        try await makeSource().archive(messageIds: messageIds, mailbox: mailbox)
+    }
+
+    /// Marks messages as junk via the relay (moved to Junk).
+    func markSpam(messageIds: [String], from mailbox: String) async throws {
+        try await makeSource().markSpam(messageIds: messageIds, mailbox: mailbox)
+    }
+
     /// Attachment metadata for one cached email (lazy, on open).
     func listAttachments(folder: String, messageId: String) async throws -> [EmailAttachment] {
         try await makeSource().listAttachments(folder: folder, messageId: messageId)
@@ -78,8 +88,14 @@ final class MailRepository {
         try await makeSource().downloadAttachment(folder: folder, messageId: messageId, index: index)
     }
 
-    func markRead(serverId: String, read: Bool = true) async throws {
+    /// Updates the local read flag and (when marking read from a known
+    /// mailbox) syncs it to the relay so other devices see it — the relay has
+    /// a "read" action but no "unread" counterpart.
+    func markRead(serverId: String, folder: String? = nil, read: Bool = true) async throws {
         try await emailDAO.updateEmail(serverId: serverId, read: read)
+        if read, let folder {
+            try await makeSource().markRead(messageIds: [serverId], mailbox: folder)
+        }
     }
 
     func send(_ email: OutgoingEmail) async -> MailOutcome {

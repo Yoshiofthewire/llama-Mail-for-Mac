@@ -84,6 +84,32 @@ final class InboxViewModel {
         }
     }
 
+    /// Archives emails (the relay moves them to Archive), then re-syncs.
+    func archive(serverIds: [String]) async {
+        guard !serverIds.isEmpty else { return }
+        await removeAndSync(serverIds: serverIds, failureVerb: "archive") { [self] in
+            try await mailRepository.archive(messageIds: serverIds, from: folder)
+        }
+    }
+
+    /// Marks emails as junk (the relay moves them to Junk), then re-syncs.
+    func markJunk(serverIds: [String]) async {
+        guard !serverIds.isEmpty else { return }
+        await removeAndSync(serverIds: serverIds, failureVerb: "mark as junk") { [self] in
+            try await mailRepository.markSpam(messageIds: serverIds, from: folder)
+        }
+    }
+
+    /// Folders an email in the current folder can be moved to, in the same
+    /// order as the macOS sidebar (used by the Move To menus).
+    var moveDestinations: [String] {
+        let all = [StandardFolder.inbox]
+            + inboxSubfolders.map(\.name)
+            + [StandardFolder.junk, StandardFolder.trash, StandardFolder.archive]
+            + archiveSubfolders.map(\.name)
+        return all.filter { $0 != folder }
+    }
+
     /// Optimistically drops `serverIds` from the list, runs the server
     /// operation, then refreshes so the list matches the server either way.
     private func removeAndSync(
@@ -140,7 +166,7 @@ final class InboxViewModel {
     }
 
     func markRead(_ email: Email) async {
-        try? await mailRepository.markRead(serverId: email.serverId)
+        try? await mailRepository.markRead(serverId: email.serverId, folder: email.folder)
         if let index = emails.firstIndex(where: { $0.serverId == email.serverId }) {
             emails[index].read = true
         }
@@ -159,15 +185,25 @@ final class InboxViewModel {
         )) ?? []
     }
 
-    /// Downloads one attachment to a temporary file and returns its URL
-    /// (for Quick Look / opening externally), or nil on failure.
-    func downloadAttachment(_ attachment: EmailAttachment, of email: Email) async -> URL? {
+    /// Raw bytes of one attachment (for Save As…), or nil on failure.
+    func attachmentData(_ attachment: EmailAttachment, of email: Email) async -> Data? {
         do {
-            let data = try await mailRepository.downloadAttachment(
+            return try await mailRepository.downloadAttachment(
                 folder: email.folder,
                 messageId: email.serverId,
                 index: attachment.index
             )
+        } catch {
+            errorMessage = "Could not download attachment: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// Downloads one attachment to a temporary file and returns its URL
+    /// (for Quick Look / opening externally), or nil on failure.
+    func downloadAttachment(_ attachment: EmailAttachment, of email: Email) async -> URL? {
+        guard let data = await attachmentData(attachment, of: email) else { return nil }
+        do {
             let directory = FileManager.default.temporaryDirectory
                 .appending(path: "attachments/\(email.serverId)/\(attachment.index)")
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

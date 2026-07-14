@@ -47,12 +47,16 @@ final class NativeRegistrationClient: Sendable {
     private struct RegisterRequest: Encodable {
         // Binding contract (backend nativeRegisterRequest in server.go):
         // subscriberId, pairingToken, and deviceToken are required (400 if
-        // missing); platform and deviceName are optional. deviceName is what
-        // the server's paired-device list displays — without it the UI falls
-        // back to platform, and unknown platforms normalize to "android".
+        // missing); platform, deviceName, and deviceId are optional.
+        // deviceName is what the server's paired-device list displays —
+        // without it the UI falls back to platform, and unknown platforms
+        // normalize to "android". deviceId makes the server update the
+        // existing device row instead of appending a duplicate; omitted on
+        // first pairing (the server mints one).
         var subscriberId: String
         var pairingToken: String
         var deviceToken: String
+        var deviceId: String?
         var platform: String
         var deviceName: String
     }
@@ -64,8 +68,13 @@ final class NativeRegistrationClient: Sendable {
     }
 
     /// Registers a push token. Called on first launch, token refresh, pairing
-    /// success, and app foreground (spec §3).
-    func register(deviceToken: String, params: PairingParams) async -> RegistrationOutcome {
+    /// success, and app foreground (spec §3). Pass the stored deviceId when
+    /// re-registering so the server updates that device instead of adding one.
+    func register(
+        deviceToken: String,
+        params: PairingParams,
+        deviceId: String? = nil
+    ) async -> RegistrationOutcome {
         guard let endpoint = params.registrationEndpoint else {
             return .failure("Invalid registration URL")
         }
@@ -88,6 +97,7 @@ final class NativeRegistrationClient: Sendable {
                     subscriberId: params.sub,
                     pairingToken: params.pt,
                     deviceToken: deviceToken,
+                    deviceId: deviceId,
                     platform: platform,
                     deviceName: deviceName
                 )

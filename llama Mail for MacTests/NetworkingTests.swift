@@ -257,10 +257,19 @@ private let validPairingLink = URL(
                 request.url!.absoluteString
                     .hasPrefix("https://relay.example.com/api/mfa/push/respond")
             )
+            // Contract: auth and device identity travel in the body, and the
+            // boolean field is "approve" (not "approved").
+            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
+            #expect(body.contains(#""challengeId":"c1""#))
+            #expect(body.contains(#""subscriberId":"u""#))
+            #expect(body.contains(#""subscriberHash":"h""#))
+            #expect(body.contains(#""deviceId":"dev-1""#))
+            #expect(body.contains(#""approve":true"#))
         }
         let outcome = await MfaResponseClient(httpClient: client).respond(
             serverUrl: "https://relay.example.com",
             auth: auth,
+            deviceId: "dev-1",
             challengeId: "c1",
             approved: true
         )
@@ -272,6 +281,7 @@ private let validPairingLink = URL(
         let outcome = await MfaResponseClient(httpClient: stubClient(status: status)).respond(
             serverUrl: "https://relay.example.com",
             auth: auth,
+            deviceId: "dev-1",
             challengeId: "c1",
             approved: false
         )
@@ -285,6 +295,7 @@ private let validPairingLink = URL(
         let outcome = await MfaResponseClient(httpClient: client).respond(
             serverUrl: "https://relay.example.com",
             auth: auth,
+            deviceId: "dev-1",
             challengeId: "c1",
             approved: true
         )

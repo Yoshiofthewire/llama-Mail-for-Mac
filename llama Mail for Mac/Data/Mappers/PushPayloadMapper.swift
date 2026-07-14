@@ -54,7 +54,21 @@ enum PushPayloadMapper {
             messageId: messageId,
             senderName: userInfo["senderName"] as? String ?? "",
             emailSubject: userInfo["emailSubject"] as? String ?? "",
-            keywords: userInfo["Keywords"] as? [String] ?? []
+            keywords: keywords(from: userInfo["Keywords"])
         ))
+    }
+
+    /// APNs data values are strings, so the backend sends Keywords
+    /// comma-joined; local (pull-mode) notifications carry a real array.
+    private static func keywords(from value: Any?) -> [String] {
+        if let array = value as? [String] {
+            return array
+        }
+        if let joined = value as? String {
+            return joined.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
+        return []
     }
 }

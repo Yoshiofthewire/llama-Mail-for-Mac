@@ -43,9 +43,10 @@ struct LlamaApp: App {
         }
         .defaultSize(width: 680, height: 620)
 
-        // Compose in its own resizable window (⌘N / toolbar).
-        WindowGroup("New Email", id: "compose") {
-            ComposeView()
+        // Compose in its own resizable window (⌘N / toolbar); reply/forward
+        // pass a prefill draft, plain compose opens with none.
+        WindowGroup("New Email", id: "compose", for: ComposeDraft.self) { $draft in
+            ComposeView(draft: draft)
                 .environment(themeManager)
                 .environment(router)
                 .environment(\.theme, themeManager.palette)

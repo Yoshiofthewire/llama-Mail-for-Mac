@@ -130,6 +130,28 @@ private func makeOutgoing(
         #expect(!bare.read) // status defaults to unread
     }
 
+    @Test func fetchEmailsSortsNewestFirstAcrossTabs() async throws {
+        // byTab is a dictionary with no stable iteration order; the flattened
+        // list must come back sorted by date regardless of tab grouping.
+        let json = """
+        {
+          "tabs": ["Work", "Personal"],
+          "byTab": {
+            "Work": [
+              { "messageId": "old", "atUtc": "2025-01-01T00:00:00Z" },
+              { "messageId": "newest", "atUtc": "2025-03-01T00:00:00Z" }
+            ],
+            "Personal": [
+              { "messageId": "middle", "atUtc": "2025-02-01T00:00:00Z" }
+            ]
+          }
+        }
+        """
+        let source = RelayMailSource(httpClient: stubClient(json: json), serverUrl: server, auth: auth)
+        let emails = try await source.fetchEmails(folder: "INBOX", from: 0, to: 50)
+        #expect(emails.map(\.serverId) == ["newest", "middle", "old"])
+    }
+
     @Test func numericCursorDecodes() throws {
         // Some deployments emit cursor as a bare number, others as a string.
         let numeric = try JSONDecoder().decode(
@@ -198,6 +220,28 @@ private func makeOutgoing(
         }
         let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
         try await source.delete(messageIds: ["e-1", "e-2"], mailbox: "Trash")
+    }
+
+    @Test(arguments: [
+        ("archive", { try await $0.archive(messageIds: ["e-1"], mailbox: "INBOX") }),
+        ("spam", { try await $0.markSpam(messageIds: ["e-1"], mailbox: "INBOX") }),
+        ("read", { try await $0.markRead(messageIds: ["e-1"], mailbox: "INBOX") }),
+    ] as [(String, @Sendable (RelayMailSource) async throws -> Void)])
+    func actionVerbsPostBulkActionBody(
+        verb: String,
+        call: @Sendable (RelayMailSource) async throws -> Void
+    ) async throws {
+        let client = stubClient(json: #"{"ok": true}"#) { request in
+            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/inbox/actions?"))
+            #expect(request.httpMethod == "POST")
+            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
+            #expect(body.contains(#""action":"\#(verb)""#))
+            #expect(body.contains(#""messageIds":["e-1"]"#))
+            #expect(body.contains(#""mailbox":"INBOX""#))
+            #expect(!body.contains("targetMailbox"))
+        }
+        let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
+        try await call(source)
     }
 
     @Test func sendPostsCommaStringBody() async throws {

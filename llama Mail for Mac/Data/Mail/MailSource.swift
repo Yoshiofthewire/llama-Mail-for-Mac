@@ -19,6 +19,12 @@ protocol MailSource: Sendable {
     /// Deletes messages. The relay moves them to Trash, or expunges them
     /// permanently when `mailbox` is already Trash (server.go ApplyInboxAction).
     func delete(messageIds: [String], mailbox: String) async throws
+    /// Moves messages to the Archive folder (Android MailAction.ARCHIVE).
+    func archive(messageIds: [String], mailbox: String) async throws
+    /// Moves messages to Junk (Android MailAction.SPAM).
+    func markSpam(messageIds: [String], mailbox: String) async throws
+    /// Flags messages read on the server so the state syncs across devices.
+    func markRead(messageIds: [String], mailbox: String) async throws
     /// Attachment metadata for one message (fetched lazily on open; the
     /// inbox listing carries no attachment info).
     func listAttachments(folder: String, messageId: String) async throws -> [EmailAttachment]

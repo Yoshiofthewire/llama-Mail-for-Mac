@@ -4,17 +4,23 @@
 //
 //  Read view. HTML bodies render in a themed WebView (matching Android
 //  EmailDetailActivity's wrapper); plain-text bodies use the mono font per
-//  STYLE_GUIDE §2 (web .email-reader-body-block). Reply/forward are v2 stubs.
+//  STYLE_GUIDE §2 (web .email-reader-body-block). Reply/Reply All/Forward
+//  open a prefilled composition (ComposeDraft).
 //
 
 import QuickLook
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
+import os
 
 struct EmailDetailView: View {
     @Environment(\.theme) private var theme
     @Environment(\.self) private var environment
     @Environment(\.dismiss) private var dismiss
+#if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+#endif
 
     let email: Email
     let inboxViewModel: InboxViewModel
@@ -23,6 +29,11 @@ struct EmailDetailView: View {
     @State private var attachments: [EmailAttachment] = []
     @State private var downloadingIndex: Int?
     @State private var quickLookURL: URL?
+    /// Downloaded attachment staged for Save As…; non-nil shows the exporter.
+    @State private var attachmentExport: AttachmentDocument?
+    /// Reply/forward prefill; non-nil presents the compose sheet (iOS only —
+    /// macOS opens the "compose" window instead).
+    @State private var composeDraft: ComposeDraft?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -52,23 +63,96 @@ struct EmailDetailView: View {
         .background(theme.bg)
         .navigationTitle(email.senderName.isEmpty ? "Email" : email.senderName)
         .toolbar {
-            ToolbarItem {
-                Button(role: .destructive) {
-                    Task {
-                        await inboxViewModel.delete(serverIds: [email.serverId])
-                        dismiss()
-                    }
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-                .help("Move to Trash")
+            // Reply/Reply All/Forward + Archive/Junk/Delete, matching Android
+            // EmailDetailActivity's action row. On iOS they live in the
+            // bottom bar — the navigation bar can't fit six buttons.
+#if os(iOS)
+            ToolbarItemGroup(placement: .bottomBar) {
+                mailActionButtons
+            }
+#else
+            ToolbarItemGroup {
+                mailActionButtons
+            }
+#endif
+        }
+#if os(iOS)
+        // The mail actions live in the bottom bar; hide the app tab bar
+        // while reading so the two don't stack.
+        .toolbarVisibility(.hidden, for: .tabBar)
+        .sheet(item: $composeDraft) { draft in
+            ComposeView(draft: draft).environment(\.theme, theme)
+        }
+#endif
+        .quickLookPreview($quickLookURL)
+        .fileExporter(
+            isPresented: Binding(
+                get: { attachmentExport != nil },
+                set: { if !$0 { attachmentExport = nil } }
+            ),
+            document: attachmentExport,
+            contentType: .data,
+            defaultFilename: attachmentExport?.name
+        ) { result in
+            if case .failure(let error) = result {
+                Log.mail.error("Attachment save failed: \(error.localizedDescription)")
             }
         }
-        .quickLookPreview($quickLookURL)
         .task {
             await inboxViewModel.markRead(email)
             attachments = await inboxViewModel.attachments(for: email)
         }
+    }
+
+    /// The six mail actions, in Android's order: reply, reply all, forward,
+    /// archive, junk, delete.
+    @ViewBuilder
+    private var mailActionButtons: some View {
+        Button {
+            compose(.reply(to: email))
+        } label: {
+            Label("Reply", systemImage: "arrowshape.turn.up.left")
+        }
+        .help("Reply to the sender")
+        Button {
+            compose(.replyAll(to: email, ownAddress: ownAddress))
+        } label: {
+            Label("Reply All", systemImage: "arrowshape.turn.up.left.2")
+        }
+        .help("Reply to the sender and all recipients")
+        Button {
+            compose(.forward(email))
+        } label: {
+            Label("Forward", systemImage: "arrowshape.turn.up.right")
+        }
+        .help("Forward this email")
+        Button {
+            Task {
+                await inboxViewModel.archive(serverIds: [email.serverId])
+                dismiss()
+            }
+        } label: {
+            Label("Archive", systemImage: "archivebox")
+        }
+        .help("Move to Archive")
+        Button {
+            Task {
+                await inboxViewModel.markJunk(serverIds: [email.serverId])
+                dismiss()
+            }
+        } label: {
+            Label("Junk", systemImage: "xmark.bin")
+        }
+        .help("Move to Junk")
+        Button(role: .destructive) {
+            Task {
+                await inboxViewModel.delete(serverIds: [email.serverId])
+                dismiss()
+            }
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+        .help("Move to Trash")
     }
 
     /// Attachment chips; tapping downloads to a temp file and Quick Looks it.
@@ -100,7 +184,14 @@ struct EmailDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(downloadingIndex != nil)
-                    .help("Download and preview")
+                    .help("Click to preview; right-click to save")
+                    .contextMenu {
+                        Button {
+                            saveAttachment(attachment)
+                        } label: {
+                            Label("Save As…", systemImage: "square.and.arrow.down")
+                        }
+                    }
                 }
             }
             .padding(.horizontal)
@@ -108,11 +199,37 @@ struct EmailDetailView: View {
         }
     }
 
+    /// Opens a prefilled composition: its own window on macOS (matching
+    /// plain compose), a sheet on iOS.
+    private func compose(_ draft: ComposeDraft) {
+#if os(macOS)
+        openWindow(id: "compose", value: draft)
+#else
+        composeDraft = draft
+#endif
+    }
+
+    /// Our own relay address (the pairing's sub), excluded from Reply All.
+    private var ownAddress: String? {
+        (try? SingletonGraph.shared.securePairingStore.loadPairing())?.sub
+    }
+
     private func openAttachment(_ attachment: EmailAttachment) {
         downloadingIndex = attachment.index
         Task {
             if let url = await inboxViewModel.downloadAttachment(attachment, of: email) {
                 quickLookURL = url
+            }
+            downloadingIndex = nil
+        }
+    }
+
+    /// Downloads an attachment's bytes and stages them for the save panel.
+    private func saveAttachment(_ attachment: EmailAttachment) {
+        downloadingIndex = attachment.index
+        Task {
+            if let data = await inboxViewModel.attachmentData(attachment, of: email) {
+                attachmentExport = AttachmentDocument(name: attachment.name, data: data)
             }
             downloadingIndex = nil
         }
@@ -202,6 +319,29 @@ struct EmailDetailView: View {
             format: "#%02X%02X%02X",
             channel(resolved.red), channel(resolved.green), channel(resolved.blue)
         )
+    }
+}
+
+/// Wraps downloaded attachment bytes for `fileExporter`. The generic `.data`
+/// content type keeps the attachment's own filename extension authoritative.
+private struct AttachmentDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.data] }
+
+    var name: String
+    var data: Data
+
+    init(name: String, data: Data) {
+        self.name = name
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        name = configuration.file.filename ?? "attachment"
+        data = configuration.file.regularFileContents ?? Data()
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }
 

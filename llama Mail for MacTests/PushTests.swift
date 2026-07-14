@@ -38,10 +38,10 @@ private func scratchStores() -> (defaults: UserDefaults, keychain: KeychainStora
     )
 }
 
-private func makePairing() -> Pairing {
+private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
     Pairing(
         sub: "u1", hash: "h1", srv: server, registrationUrl: nil,
-        pairingToken: "pt", lastDeviceId: nil, pairedAt: Date()
+        pairingToken: "pt", lastDeviceId: lastDeviceId, pairedAt: Date()
     )
 }
 
@@ -64,6 +64,19 @@ private func makePairing() -> Pairing {
         #expect(mail.senderName == "Ada")
         #expect(mail.emailSubject == "Hello")
         #expect(mail.keywords == ["Important", "Work"])
+    }
+
+    @Test func mapsCommaJoinedKeywordsFromApnsData() throws {
+        // APNs data values are strings; the backend comma-joins Keywords.
+        let userInfo: [AnyHashable: Any] = [
+            "messageId": "m-3",
+            "Keywords": "Important, Work,,Receipts",
+        ]
+        guard case .mail(let mail)? = PushPayloadMapper.map(userInfo: userInfo) else {
+            Issue.record("Expected mail payload")
+            return
+        }
+        #expect(mail.keywords == ["Important", "Work", "Receipts"])
     }
 
     @Test func mapsMinimalMailPayload() {
@@ -245,6 +258,88 @@ private func makePairing() -> Pairing {
         let outcome = await env.service.reregisterIfPaired(deviceToken: "t")
         #expect(outcome == nil)
     }
+
+    /// Re-registration must carry the stored deviceId so the server updates
+    /// the existing device row instead of pairing the computer again.
+    @Test func reregisterSendsStoredDeviceId() async throws {
+        let client = stubClient(json: #"{"ok": true, "deviceId": "dev-1"}"#) { request in
+            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
+            #expect(body.contains(#""deviceId":"dev-1""#))
+        }
+        let env = try makeEnvironment(client: client, paired: true)
+        let outcome = await env.service.reregisterIfPaired(deviceToken: "t2")
+        #expect(outcome != nil)
+    }
+
+    /// First pairing has no deviceId yet — the server mints one.
+    @Test func initialPairingOmitsDeviceId() async throws {
+        let client = stubClient(json: #"{"ok": true, "deviceId": "dev-9"}"#) { request in
+            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
+            #expect(!body.contains(#""deviceId""#))
+        }
+        let env = try makeEnvironment(client: client)
+        let outcome = await env.service.pair(params: params, deviceToken: "t")
+        guard case .success = outcome else {
+            Issue.record("Expected success, got \(outcome)")
+            return
+        }
+    }
+}
+
+// MARK: - DeviceRegistrationService dedupe (one registration per click)
+
+@MainActor
+@Suite struct DeviceRegistrationServiceDedupeTests {
+    private final class RequestCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func increment() { lock.lock(); value += 1; lock.unlock() }
+        var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+    }
+
+    private let params = PairingParams(sub: "u1", hash: "h1", srv: server, pt: "pt-1")
+
+    private func makeService(counter: RequestCounter) -> DeviceRegistrationService {
+        let client = HTTPClient { request in
+            counter.increment()
+            try? await Task.sleep(for: .milliseconds(10))
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (Data(#"{"ok": true, "deviceId": "dev-7"}"#.utf8), response)
+        }
+        let (defaults, keychain) = scratchStores()
+        return DeviceRegistrationService(
+            client: NativeRegistrationClient(httpClient: client),
+            securePairingStore: SecurePairingStore(keychain: keychain),
+            pushSettingsStore: PushSettingsStore(defaults: defaults)
+        )
+    }
+
+    /// The pairing deep link is delivered to every open main window and each
+    /// auto-pairs; concurrent calls with one pairing token + device token
+    /// must collapse into a single registration.
+    @Test func concurrentPairsWithSameTokensRegisterOnce() async {
+        let counter = RequestCounter()
+        let service = makeService(counter: counter)
+        async let first = service.pair(params: params, deviceToken: "t")
+        async let second = service.pair(params: params, deviceToken: "t")
+        _ = await [first, second]
+        #expect(counter.count == 1)
+    }
+
+    /// A refreshed APNs token is a different registration and must not be
+    /// swallowed by the dedupe guard.
+    @Test func newDeviceTokenRegistersAgain() async {
+        let counter = RequestCounter()
+        let service = makeService(counter: counter)
+        _ = await service.pair(params: params, deviceToken: "t1")
+        _ = await service.pair(params: params, deviceToken: "t2")
+        #expect(counter.count == 2)
+    }
 }
 
 // MARK: - ApproveMfaChallengeUseCase
@@ -264,10 +359,13 @@ private func makePairing() -> Pairing {
 
     @Test func approvesThroughPairedServer() async throws {
         let client = stubClient(json: #"{"ok": true}"#) { request in
-            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/mfa/push/respond?"))
+            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/mfa/push/respond"))
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""challengeId":"c-1""#))
-            #expect(body.contains(#""approved":true"#))
+            #expect(body.contains(#""subscriberId":"u1""#))
+            #expect(body.contains(#""subscriberHash":"h1""#))
+            #expect(body.contains(#""deviceId":"dev-1""#))
+            #expect(body.contains(#""approve":true"#))
         }
         let useCase = try makeUseCase(client: client, paired: true)
         let outcome = await useCase(challengeId: "c-1", approved: true)
@@ -278,5 +376,20 @@ private func makePairing() -> Pairing {
         let useCase = try makeUseCase(client: stubClient(), paired: false)
         let outcome = await useCase(challengeId: "c-1", approved: false)
         #expect(outcome == .failure("Device is not paired"))
+    }
+
+    @Test func failsWithoutDeviceId() async throws {
+        let (_, keychain) = scratchStores()
+        let pairingStore = SecurePairingStore(keychain: keychain)
+        try pairingStore.savePairing(makePairing(lastDeviceId: nil))
+        let useCase = ApproveMfaChallengeUseCase(
+            client: MfaResponseClient(httpClient: stubClient()),
+            securePairingStore: pairingStore
+        )
+        let outcome = await useCase(challengeId: "c-1", approved: true)
+        guard case .failure = outcome else {
+            Issue.record("Expected failure without a device ID, got \(outcome)")
+            return
+        }
     }
 }

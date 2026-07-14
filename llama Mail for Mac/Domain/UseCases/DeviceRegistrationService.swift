@@ -27,6 +27,15 @@ final class DeviceRegistrationService {
     private let securePairingStore: SecurePairingStore
     private let pushSettingsStore: PushSettingsStore
 
+    /// One registration per (pairing token, device token). A pairing deep
+    /// link is delivered to every open main window and each auto-pairs, so
+    /// without this guard a single "Pair Desktop App" click registers the
+    /// same computer several times (the server appends a device row per
+    /// register call). Unlike desktop pairing codes these are not single-use,
+    /// so only concurrent calls are shared — a later call with a new device
+    /// token (APNs refresh) must still go through.
+    private var inFlight: [String: Task<RegistrationOutcome, Never>] = [:]
+
     init(
         client: NativeRegistrationClient,
         securePairingStore: SecurePairingStore,
@@ -39,8 +48,35 @@ final class DeviceRegistrationService {
 
     /// Initial pairing (QR scan / deep link). Persists the pairing and
     /// delivery settings only if registration succeeds (spec §1 flow).
-    func pair(params: PairingParams, deviceToken: String) async -> RegistrationOutcome {
-        let outcome = await client.register(deviceToken: deviceToken, params: params)
+    /// Concurrent calls with the same tokens share one registration.
+    func pair(
+        params: PairingParams,
+        deviceToken: String,
+        deviceId: String? = nil
+    ) async -> RegistrationOutcome {
+        let key = "\(params.pt)|\(deviceToken)"
+        if let task = inFlight[key] {
+            return await task.value
+        }
+        let task = Task {
+            await performPair(params: params, deviceToken: deviceToken, deviceId: deviceId)
+        }
+        inFlight[key] = task
+        let outcome = await task.value
+        inFlight[key] = nil
+        return outcome
+    }
+
+    private func performPair(
+        params: PairingParams,
+        deviceToken: String,
+        deviceId: String?
+    ) async -> RegistrationOutcome {
+        let outcome = await client.register(
+            deviceToken: deviceToken,
+            params: params,
+            deviceId: deviceId
+        )
         if case .success(let response) = outcome {
             do {
                 try securePairingStore.savePairing(Pairing(
@@ -49,7 +85,7 @@ final class DeviceRegistrationService {
                     srv: params.srv,
                     registrationUrl: params.reg,
                     pairingToken: params.pt,
-                    lastDeviceId: response.deviceId,
+                    lastDeviceId: response.deviceId ?? deviceId,
                     pairedAt: Date()
                 ))
             } catch {
@@ -63,10 +99,16 @@ final class DeviceRegistrationService {
     }
 
     /// Re-registration for safety (token refresh, app foreground, spec §3).
+    /// Sends the stored deviceId so the server updates the existing device
+    /// row rather than pairing this computer a second time.
     /// Returns nil when the device was never paired — nothing to refresh.
     @discardableResult
     func reregisterIfPaired(deviceToken: String) async -> RegistrationOutcome? {
         guard let pairing = try? securePairingStore.loadPairing() else { return nil }
-        return await pair(params: PairingParams(pairing: pairing), deviceToken: deviceToken)
+        return await pair(
+            params: PairingParams(pairing: pairing),
+            deviceToken: deviceToken,
+            deviceId: pairing.lastDeviceId
+        )
     }
 }

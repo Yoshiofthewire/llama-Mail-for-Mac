@@ -47,12 +47,25 @@ struct InboxView: View {
                         EmailListRow(email: email)
                     }
                     .buttonStyle(.plain)
+                    // Matches Android's gestures: swipe left archives, swipe
+                    // right deletes (InboxActivity setupSwipeGestures).
                     .swipeActions(edge: .trailing) {
+                        Button {
+                            Task { await viewModel.archive(serverIds: [email.serverId]) }
+                        } label: {
+                            Label("Archive", systemImage: "archivebox")
+                        }
+                        .tint(theme.accent)
+                    }
+                    .swipeActions(edge: .leading) {
                         Button(role: .destructive) {
                             Task { await viewModel.delete(serverIds: [email.serverId]) }
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
+                    }
+                    .contextMenu {
+                        emailActions(for: email)
                     }
                     .listRowBackground(theme.bg)
                     .listRowSeparatorTint(theme.line)
@@ -113,7 +126,8 @@ struct InboxView: View {
         }
     }
 
-    /// Server folder choices, shared by the title menu and the toolbar button.
+    /// Server folder choices, shared by the title menu and the toolbar
+    /// button; same set and order as the macOS sidebar.
     private var folderPicker: some View {
         Picker("Folder", selection: folderSelection) {
             Label("Inbox", systemImage: "tray").tag(StandardFolder.inbox)
@@ -121,8 +135,46 @@ struct InboxView: View {
                 Label(StandardFolder.displayName(sub.name), systemImage: "folder")
                     .tag(sub.name)
             }
+            Label("Drafts", systemImage: "doc.text").tag(StandardFolder.drafts)
             Label("Junk", systemImage: "xmark.bin").tag(StandardFolder.junk)
+            Label("Sent", systemImage: "paperplane").tag(StandardFolder.sent)
             Label("Trash", systemImage: "trash").tag(StandardFolder.trash)
+            Label("Archive", systemImage: "archivebox").tag(StandardFolder.archive)
+            ForEach(viewModel.archiveSubfolders, id: \.name) { sub in
+                Label(StandardFolder.displayName(sub.name), systemImage: "folder")
+                    .tag(sub.name)
+            }
+        }
+    }
+
+    /// Long-press actions on a row — the touch counterpart of the macOS
+    /// context menu and sidebar drag-and-drop.
+    @ViewBuilder
+    private func emailActions(for email: Email) -> some View {
+        Button {
+            Task { await viewModel.archive(serverIds: [email.serverId]) }
+        } label: {
+            Label("Archive", systemImage: "archivebox")
+        }
+        Menu {
+            ForEach(viewModel.moveDestinations, id: \.self) { destination in
+                Button(StandardFolder.displayName(destination)) {
+                    Task { await viewModel.move(serverIds: [email.serverId], to: destination) }
+                }
+            }
+        } label: {
+            Label("Move To", systemImage: "folder")
+        }
+        Button {
+            Task { await viewModel.markJunk(serverIds: [email.serverId]) }
+        } label: {
+            Label("Move to Junk", systemImage: "xmark.bin")
+        }
+        Divider()
+        Button(role: .destructive) {
+            Task { await viewModel.delete(serverIds: [email.serverId]) }
+        } label: {
+            Label("Delete", systemImage: "trash")
         }
     }
 

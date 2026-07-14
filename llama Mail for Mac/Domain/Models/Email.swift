@@ -15,6 +15,10 @@ struct Email: Identifiable, Hashable, Sendable {
     var senderEmail: String
     var subject: String
     var body: String
+    /// Raw To/Cc header strings (comma-joined, entries may be
+    /// "Name <addr>"); kept for Reply All recipient building.
+    var sentTo: String = ""
+    var cc: String = ""
     /// Relay tab/label values; drives inbox tabs.
     var keywords: Set<String>
     var receivedAt: Date
