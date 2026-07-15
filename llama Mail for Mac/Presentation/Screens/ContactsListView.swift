@@ -12,6 +12,7 @@ struct ContactsListView: View {
 
     @Bindable var viewModel: ContactsViewModel
     @State private var showNewContact = false
+    @State private var showScanKey = false
 
     var body: some View {
         Group {
@@ -63,24 +64,34 @@ struct ContactsListView: View {
                     Label("Add Contact", systemImage: "plus")
                 }
             }
+            // Add + Sync + Find Duplicates + Scan is more than an iPhone nav
+            // bar holds, so everything but Add collapses into one menu.
             ToolbarItem {
-                Button {
-                    Task { await viewModel.sync() }
+                Menu {
+                    Button {
+                        Task { await viewModel.sync() }
+                    } label: {
+                        Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(viewModel.isSyncing)
+                    Button {
+                        Task { await viewModel.dedupe() }
+                    } label: {
+                        Label("Find Duplicates", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                    .disabled(viewModel.isSyncing)
+                    Button {
+                        showScanKey = true
+                    } label: {
+                        Label("Scan Contact Key", systemImage: "qrcode.viewfinder")
+                    }
                 } label: {
                     if viewModel.isSyncing {
                         ProgressView().controlSize(.small)
                     } else {
-                        Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                        Label("Contact Actions", systemImage: "ellipsis.circle")
                     }
                 }
-            }
-            ToolbarItem {
-                Button {
-                    Task { await viewModel.dedupe() }
-                } label: {
-                    Label("Find Duplicates", systemImage: "person.crop.circle.badge.checkmark")
-                }
-                .disabled(viewModel.isSyncing)
             }
         }
         .sheet(isPresented: $showNewContact) {
@@ -88,6 +99,15 @@ struct ContactsListView: View {
                 ContactDetailView(contact: nil, viewModel: viewModel)
             }
             .environment(\.theme, theme)
+        }
+        .sheet(isPresented: $showScanKey) {
+            ScanPgpKeyView()
+                .environment(\.theme, theme)
+        }
+        .onChange(of: showScanKey) { _, isPresented in
+            // A scanned key lands on a contact via the repository, so the list
+            // in memory is stale until it reloads.
+            if !isPresented { Task { await viewModel.load() } }
         }
         .task { await viewModel.load() }
         .overlay(alignment: .bottom) {

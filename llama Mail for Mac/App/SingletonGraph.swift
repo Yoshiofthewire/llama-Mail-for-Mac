@@ -52,6 +52,7 @@ final class SingletonGraph {
     lazy var pushNotificationClient = PushNotificationClient(httpClient: httpClient)
     lazy var mfaResponseClient = MfaResponseClient(httpClient: httpClient)
     lazy var contactSyncClient = ContactSyncClient(httpClient: httpClient)
+    lazy var pgpQrClient = PgpQrClient(httpClient: httpClient)
 
     // MARK: - Repositories & Use Cases
 

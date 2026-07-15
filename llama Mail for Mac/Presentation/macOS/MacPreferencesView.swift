@@ -39,8 +39,12 @@ struct MacPreferencesView: View {
 
             NotificationsPane(viewModel: viewModel)
                 .tabItem { Label("Notifications", systemImage: "bell.badge") }
+
+            EncryptionPane()
+                .tabItem { Label("Encryption", systemImage: "lock.shield") }
         }
-        .frame(width: 560, height: 460)
+        // Widened from 560 for the sixth tab, and so the QR code has room.
+        .frame(width: 620, height: 460)
         .tint(themeManager.palette.accent)
         .environment(\.theme, themeManager.palette)
         .preferredColorScheme(themeManager.palette.preferredColorScheme)
@@ -228,6 +232,18 @@ private struct KeywordsPane: View {
         }
         .formStyle(.grouped)
         .task { await viewModel.loadKeywordSettings() }
+    }
+}
+
+// MARK: - Contacts
+
+// MARK: - Encryption
+
+/// "My QR Code" only. Scanning someone else's key starts from the contact
+/// list, where the contact to attach it to already is.
+private struct EncryptionPane: View {
+    var body: some View {
+        MyPgpQrCodeView()
     }
 }
 

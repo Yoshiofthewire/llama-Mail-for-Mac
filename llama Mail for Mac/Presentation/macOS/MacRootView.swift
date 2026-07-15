@@ -28,6 +28,7 @@ struct MacRootView: View {
     @State private var section: MacSection? = .inbox(keyword: nil)
     @State private var selectedEmails: Set<Email> = []
     @State private var selectedContact: Contact?
+    @State private var showScanKey = false
     /// When off, the email preview pane is hidden and reading happens in
     /// pop-out windows (double-click). Contacts always keep their detail pane.
     @AppStorage("macShowPreviewPane") private var showPreviewPane = true
@@ -317,6 +318,22 @@ struct MacRootView: View {
                 }
                 .disabled(contactsViewModel.isSyncing)
             }
+            ToolbarItem {
+                Button {
+                    showScanKey = true
+                } label: {
+                    Label("Scan Contact Key", systemImage: "qrcode.viewfinder")
+                }
+            }
+        }
+        .sheet(isPresented: $showScanKey) {
+            ScanPgpKeyView()
+                .environment(\.theme, theme)
+        }
+        .onChange(of: showScanKey) { _, isPresented in
+            // A scanned key lands on a contact via the repository, so the list
+            // in memory is stale until it reloads.
+            if !isPresented { Task { await contactsViewModel.load() } }
         }
         .overlay(alignment: .bottom) {
             if let message = contactsViewModel.statusMessage {

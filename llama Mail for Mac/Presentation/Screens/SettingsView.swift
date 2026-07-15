@@ -108,6 +108,17 @@ struct SettingsView: View {
             }
             .listRowBackground(theme.panel)
 
+            Section {
+                NavigationLink("My QR Code") {
+                    MyPgpQrCodeView()
+                }
+            } header: {
+                Text("Encryption")
+            } footer: {
+                Text("Show your public key as a QR code for someone to scan in person. To add someone else's key, use Scan Contact Key on the Contacts screen.")
+            }
+            .listRowBackground(theme.panel)
+
             Section("About") {
                 LabeledContent(
                     "Version",
