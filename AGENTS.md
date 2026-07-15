@@ -81,3 +81,7 @@ When the user requests a durable behavior change, record it here or in the relev
 
 ## Child DOX Index
 
+- `llama Mail for Mac/Presentation/AGENTS.md` — SwiftUI views, view models, and
+  components: theming and font contracts, MainActor isolation rules, compose
+  recipient tokens and contact search, and the macOS/iOS input deviations.
+

@@ -1,1 +1,72 @@
-Email Address Book Lookup and Composition InterfaceYou are an expert software engineer specializing in desktop and web email client development. Your task is to implement a robust, local address book lookup system and an interactive selection interface for composing emails.Strictly adhere to the following requirements:1. Local Autocomplete Search EngineTrigger: Activate when a user types into the TO, CC, or BCC input fields.Data Source: Query a local SQLite or IndexedDB address book database.Search Fields: Search simultaneously against both the Name field and the Email Address field.Matching Logic: Use a case-insensitive, partial-match algorithm (e.g., LIKE '%query%' or regex).Performance: Debounce keystrokes by 150ms to minimize database load. Limit UI dropdown results to the top 5 closest matches.2. Autocomplete Dropdown UIVisual Design: Display matches in a clean floating dropdown below the active input line.Content: Each row must clearly show the contact's Full Name and Email Address. Bold the matching characters.Navigation: Enable full keyboard navigation (Up/Down arrow keys to select, Enter/Tab to confirm, Escape to close).Tokenization: Upon selection, convert the text into a visual "pill" or "token" component containing the email address. Add an "X" button to easily delete the token.3. Address Book Search Interface (Modal/Sidebar)Access Point: Provide a clickable directory/address book icon next to the address input fields.Layout: Open a dedicated modal or sliding panel featuring a prominent top search bar and a scrollable table or grid of results.Actionable Columns: Display columns for Name, Email, and Department. Next to each contact, include three distinct, clickable action buttons or checkboxes labeled TO, CC, and BCC.Selection Behavior: Clicking one of these buttons must instantly append that contact's email as a token into the corresponding field of the active composition window.Feedback: Keep the interface open for multi-selection, but provide a subtle visual indicator (e.g., checkmark or color change) showing the contact has been added.4. Edge Cases and ErrorsNo Results Found: Display a subtle "No contacts found" message inside the autocomplete dropdown rather than leaving it blank.Duplicate Prevention: If a user selects a contact that is already present in the TO, CC, or BCC fields, ignore the duplicate action and show a brief toast notification.Invalid Formats: Allow users to manually type and add custom email addresses that are not in the database, provided they pass a standard RFC 5322 email regex validation.
+# Contact autocomplete and address book lookup
+
+Status: implemented. Compose searches the local address book as you type,
+commits recipients as removable pills, and offers a browsable directory.
+
+## Behaviour
+
+**Autocomplete** — typing in To/Cc/Bcc searches name and address together,
+case- and diacritic-insensitively, on a 150ms debounce, and offers the five
+closest matches. Ranking is explicit (`MatchRank`): name prefix, name word
+prefix, address prefix, name substring, address substring; ties break by match
+offset, then name, then address.
+
+**Dropdown** — floats under the active row, one row per (contact, address) with
+the matched characters bold. Capped at two rows per contact so one
+many-addressed contact can't fill it. Up/Down move the highlight, Return or Tab
+confirm, Escape closes. Empty results show "No contacts found". Nothing is
+highlighted until you press Down, so Return commits what you actually typed.
+
+**Tokens** — a committed recipient becomes a pill with an X button. Contact-
+backed pills show an avatar and the person's name; hand-typed ones show the
+bare address in mono.
+
+**Address book** — the directory button by the To field opens a searchable
+table (Name, Email, Department) with per-row TO/CC/BCC buttons. It stays open
+for multi-select and ticks contacts already added. Multi-address contacts pick
+an address from a menu.
+
+**Edge cases** — duplicates are refused across all three fields (the same
+person in To and Cc is always a mistake) with a toast; the other fields' buttons
+show disabled rather than silently refusing. Addresses not in the book are
+accepted if valid. Leaving a field commits what's in it, so nothing typed is
+lost — including on send, where a typed-but-not-confirmed address still goes
+out. Half-typed search terms survive a blur without an error.
+
+## Implementation notes
+
+| Concern | Where |
+|---|---|
+| Matching, ranking, highlighting | `Domain/UseCases/ContactSearch.swift` |
+| Validation and header parsing | `Utilities/EmailAddress.swift` |
+| Recipient model | `Domain/Models/RecipientToken.swift` |
+| Field, dropdown, wrapping, toast | `Presentation/Components/` |
+| Directory modal | `Presentation/Screens/AddressBookView.swift` |
+| State, debounce, duplicates | `Presentation/Shared/ViewModels/ComposeViewModel.swift` |
+
+Durable contracts and platform deviations: `llama Mail for Mac/Presentation/AGENTS.md`.
+
+## Where this differs from the original spec
+
+The spec was written for a web client. Deviations, all deliberate:
+
+- **Search is in memory, not a SQLite `LIKE`.** `Contact.emails` is an encoded
+  Codable blob that `#Predicate` can't see inside, so matching on an address in
+  the store would need a denormalized column, a schema migration, and upkeep on
+  every write path. `ContactsViewModel.searchIndex` is that same SQLite book,
+  materialized, and is already the list the UI renders. The 150ms debounce is
+  kept regardless — it caps main-actor work and stops the dropdown flickering.
+- **Validation is the HTML5 email grammar, not RFC 5322.** Real RFC 5322
+  accepts quoted local parts, comments, and IP literals nobody wants in a To
+  field. HTML5's production is what mail clients enforce; a dot in the domain
+  is additionally required.
+- **iOS has no arrow-key or Escape navigation** — `onKeyPress` needs a hardware
+  keyboard. The dropdown is tap-driven there.
+- **No backspace-deletes-last-token** — AppKit's field editor consumes
+  backspace before SwiftUI sees it. The X button is the removal path.
+- **The dropdown highlights nothing until you press Down.** Preselecting the
+  first row would make Return on a fully-typed address silently insert a
+  different contact.
+- **A themed `List` of fixed-width rows, not `Table`** — `Table` collapses to
+  one column on iOS and can't be themed. Costs column sorting, which the spec
+  didn't ask for.

@@ -181,7 +181,7 @@ final class SystemContactsExporter {
     private func performReconcile() async -> Summary {
         var summary = Summary()
         guard settings.exportToSystemContactsEnabled, isAuthorized else { return summary }
-        let cards = (try? store.listAll()) ?? []
+        let cards = (try? await store.listAll()) ?? []
         await adoptMatchingCards(cards, summary: &summary)
         await importNewCards(cards, summary: &summary)
         let contacts = (try? await contactDAO.listAll()) ?? []
@@ -222,7 +222,7 @@ final class SystemContactsExporter {
         var summary = Summary()
         if let link = linkStore.link(localId: contact.localId) {
             upsertLinked(contact, cnIdentifier: link.cnIdentifier, summary: &summary)
-        } else if let match = adoptableCard(for: contact) {
+        } else if let match = await adoptableCard(for: contact) {
             // Same person already has a card on this device: update it in
             // place instead of creating a junk duplicate.
             upsertLinked(contact, cnIdentifier: match.identifier, summary: &summary)
@@ -300,10 +300,10 @@ final class SystemContactsExporter {
 
     /// Single-contact flavor of the adoption pass, for the incremental save
     /// hook: the first unlinked card matching this contact's identity.
-    private func adoptableCard(for contact: Contact) -> CNContact? {
+    private func adoptableCard(for contact: Contact) async -> CNContact? {
         guard let key = SystemContactMapper.matchKey(for: contact) else { return nil }
         let linkedIdentifiers = Set(linkStore.all().map(\.cnIdentifier))
-        let cards = (try? store.listAll()) ?? []
+        let cards = (try? await store.listAll()) ?? []
         return cards.first {
             !linkedIdentifiers.contains($0.identifier)
                 && SystemContactMapper.matchKeys(for: $0).contains(key)

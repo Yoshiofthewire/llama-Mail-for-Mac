@@ -62,7 +62,7 @@ nonisolated struct ContactCustomField: Codable, Hashable, Sendable {
     var value: String
 }
 
-struct Contact: Identifiable, Hashable, Sendable {
+nonisolated struct Contact: Identifiable, Hashable, Sendable {
     /// Stable local identity; contacts created locally have no server `uid`
     /// until ContactSyncReconciliation assigns one (spec §4).
     var localId: UUID = UUID()

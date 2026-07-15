@@ -14,7 +14,7 @@
 import Foundation
 import Security
 
-final class KeychainStorage: Sendable {
+nonisolated final class KeychainStorage: Sendable {
     struct KeychainError: Error, CustomStringConvertible {
         let status: OSStatus
         var description: String { "Keychain error (OSStatus \(status))" }

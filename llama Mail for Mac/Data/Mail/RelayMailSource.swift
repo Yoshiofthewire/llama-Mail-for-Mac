@@ -177,7 +177,7 @@ struct RelayAttachmentListResponse: Decodable, Sendable {
 }
 
 /// Outgoing attachment: base64 in the send/draft JSON (Mobile_Mail_Relay.md).
-struct RelaySendAttachmentDTO: Encodable, Equatable, Sendable {
+nonisolated struct RelaySendAttachmentDTO: Encodable, Equatable, Sendable {
     var name: String
     var mimeType: String
     var dataBase64: String

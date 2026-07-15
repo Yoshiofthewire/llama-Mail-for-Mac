@@ -15,7 +15,9 @@ protocol SystemContactStoring {
     /// Returns nil when the card no longer exists (deleted in Contacts.app).
     func fetch(identifier: String) throws -> CNContact?
     /// Every card visible to the app, fetched with `SystemContactMapper.keysToFetch`.
-    func listAll() throws -> [CNContact]
+    /// Async so the live store can enumerate off the main thread (the Contacts
+    /// framework raises a runtime issue for main-thread enumeration).
+    func listAll() async throws -> [CNContact]
     /// Caller reads `contact.identifier` afterwards to record the link.
     func add(_ contact: CNMutableContact) throws
     func update(_ contact: CNMutableContact) throws
@@ -45,13 +47,25 @@ final class LiveSystemContactStore: SystemContactStoring {
         }
     }
 
-    func listAll() throws -> [CNContact] {
-        let request = CNContactFetchRequest(keysToFetch: SystemContactMapper.keysToFetch)
-        var cards: [CNContact] = []
-        try store.enumerateContacts(with: request) { contact, _ in
-            cards.append(contact)
+    func listAll() async throws -> [CNContact] {
+        // CNContactStore and CNContact are documented thread-safe but carry no
+        // Sendable annotation, hence the unsafe markers to cross the hop.
+        nonisolated(unsafe) let store = self.store
+        nonisolated(unsafe) let keysToFetch = SystemContactMapper.keysToFetch
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let request = CNContactFetchRequest(keysToFetch: keysToFetch)
+                    var cards: [CNContact] = []
+                    try store.enumerateContacts(with: request) { contact, _ in
+                        cards.append(contact)
+                    }
+                    continuation.resume(returning: cards)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
         }
-        return cards
     }
 
     func add(_ contact: CNMutableContact) throws {

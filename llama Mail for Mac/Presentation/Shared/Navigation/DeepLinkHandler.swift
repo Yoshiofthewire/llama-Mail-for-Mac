@@ -120,6 +120,10 @@ enum NavigationAction: Equatable, Sendable {
 }
 
 struct DeepLinkHandler: Sendable {
+    /// Nonisolated so `DeepLinkHandler()` can appear as a default argument
+    /// (evaluated in a nonisolated context) without an isolation hop.
+    nonisolated init() {}
+
     /// Maps an incoming URL to a navigation action; nil for unrecognized URLs.
     func handle(_ url: URL) -> NavigationAction? {
         if let params = try? PairingLinkParser.parse(url) {
