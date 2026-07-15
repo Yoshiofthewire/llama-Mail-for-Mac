@@ -82,6 +82,9 @@ Recorded so they aren't re-litigated as bugs:
 
 - Unit: `xcodebuild test -scheme "llama Mail for Mac" -destination 'platform=macOS'`
   (Swift Testing; `ContactSearchTests`, `ComposeRecipientTests`).
+- Pass `debounceInterval: .zero` to `ComposeViewModel` in tests, and poll for
+  the result rather than sleeping a fixed span — the search lands a scheduling
+  hop later even at zero, so a fixed sleep goes flaky under load.
 - Focus, key routing, overlay z-order, and `FlowLayout` wrapping are not
   unit-testable — drive the app (XCUITest against the `New Email` window
   reaches them) and look at the result.
