@@ -96,12 +96,7 @@ import Testing
     @MainActor
     private func makeViewModel(client: HTTPClient) throws -> InboxViewModel {
         let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
-        let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-        let pairingStore = SecurePairingStore(keychain: keychain)
-        try pairingStore.savePairing(Pairing(
-            sub: "u", hash: "h", srv: "https://relay.example.com",
-            registrationUrl: nil, pairingToken: "pt", lastDeviceId: nil, pairedAt: Date()
-        ))
+        let pairingStore = try makePairedStore()
         let db = try AppDatabase(inMemory: true)
         let mailRepository = MailRepository(
             securePairingStore: pairingStore,

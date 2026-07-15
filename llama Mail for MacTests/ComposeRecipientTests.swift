@@ -12,36 +12,8 @@ import Testing
 
 // MARK: - Helpers
 
-private let server = "https://relay.example.com"
 
-private func stubClient(
-    status: Int = 200,
-    json: String = "{}",
-    onRequest: (@Sendable (URLRequest) -> Void)? = nil
-) -> HTTPClient {
-    HTTPClient { request in
-        onRequest?(request)
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: status,
-            httpVersion: nil,
-            headerFields: nil
-        )!
-        return (Data(json.utf8), response)
-    }
-}
 
-private func makeContact(_ name: String, _ emails: String...) -> Contact {
-    var contact = Contact(
-        uid: nil,
-        name: name,
-        avatarUrl: nil,
-        createdAt: Date(),
-        updatedAt: Date()
-    )
-    contact.emails = emails.map { ContactLabeledValue(label: nil, value: $0) }
-    return contact
-}
 
 @MainActor
 private struct Environment {
@@ -59,12 +31,7 @@ private func makeEnvironment(
     onSend: (@Sendable (URLRequest) -> Void)? = nil
 ) async throws -> Environment {
     let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
-    let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-    let pairingStore = SecurePairingStore(keychain: keychain)
-    try pairingStore.savePairing(Pairing(
-        sub: "u1", hash: "h1", srv: server, registrationUrl: nil,
-        pairingToken: "pt", lastDeviceId: nil, pairedAt: Date()
-    ))
+    let pairingStore = try makePairedStore()
     let db = try AppDatabase(inMemory: true)
     let dao = ContactDAO(modelContainer: db.container)
     if !seed.isEmpty {
@@ -359,26 +326,26 @@ struct ComposeSendTests {
     /// The regression test for silent recipient loss: typing an address and
     /// hitting ⌘↩ without pressing Return first must still mail it.
     @Test func flushesTypedInputBeforeSending() async throws {
-        let captured = Captured()
-        let env = try await makeEnvironment(onSend: { captured.store($0) })
+        let captured = Box<URLRequest?>(nil)
+        let env = try await makeEnvironment(onSend: { captured.value = $0 })
         env.viewModel.toInput = "typed@x.com"
         await env.viewModel.send(fontTraits: plainTraits)
 
-        let request = try #require(captured.request)
+        let request = try #require(captured.value)
         #expect(try sentRecipients(from: request)["to"] == ["typed@x.com"])
         #expect(env.viewModel.didSend)
     }
 
     @Test func sendsBareAddressesNotDisplayNames() async throws {
-        let captured = Captured()
+        let captured = Box<URLRequest?>(nil)
         let env = try await makeEnvironment(
             draft: ComposeDraft(to: "alice@x.com", cc: "b@y.com", bcc: "c@z.com"),
             contacts: [makeContact("Alice Chen", "alice@x.com")],
-            onSend: { captured.store($0) }
+            onSend: { captured.value = $0 }
         )
         await env.viewModel.send(fontTraits: plainTraits)
 
-        let sent = try sentRecipients(from: try #require(captured.request))
+        let sent = try sentRecipients(from: try #require(captured.value))
         #expect(sent["to"] == ["alice@x.com"])
         #expect(sent["cc"] == ["b@y.com"])
         #expect(sent["bcc"] == ["c@z.com"])
@@ -394,21 +361,3 @@ struct ComposeSendTests {
     }
 }
 
-/// Box for the address the stub transport saw. The HTTPClient closure is
-/// @Sendable, so the capture can't just be a local var.
-private final class Captured: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored: URLRequest?
-
-    var request: URLRequest? {
-        lock.lock()
-        defer { lock.unlock() }
-        return stored
-    }
-
-    func store(_ request: URLRequest) {
-        lock.lock()
-        defer { lock.unlock() }
-        stored = request
-    }
-}

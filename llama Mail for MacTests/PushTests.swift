@@ -12,24 +12,7 @@ import Testing
 
 // MARK: - Helpers
 
-private func stubClient(
-    status: Int = 200,
-    json: String = "{}",
-    onRequest: (@Sendable (URLRequest) -> Void)? = nil
-) -> HTTPClient {
-    HTTPClient { request in
-        onRequest?(request)
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: status,
-            httpVersion: nil,
-            headerFields: nil
-        )!
-        return (Data(json.utf8), response)
-    }
-}
 
-private let server = "https://relay.example.com"
 
 private func scratchStores() -> (defaults: UserDefaults, keychain: KeychainStorage) {
     (
@@ -290,18 +273,11 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
 
 @MainActor
 @Suite struct DeviceRegistrationServiceDedupeTests {
-    private final class RequestCounter: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value = 0
-        func increment() { lock.lock(); value += 1; lock.unlock() }
-        var count: Int { lock.lock(); defer { lock.unlock() }; return value }
-    }
-
     private let params = PairingParams(sub: "u1", hash: "h1", srv: server, pt: "pt-1")
 
-    private func makeService(counter: RequestCounter) -> DeviceRegistrationService {
+    private func makeService(counter: Box<Int>) -> DeviceRegistrationService {
         let client = HTTPClient { request in
-            counter.increment()
+            counter.mutate { $0 += 1 }
             try? await Task.sleep(for: .milliseconds(10))
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -323,22 +299,22 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
     /// auto-pairs; concurrent calls with one pairing token + device token
     /// must collapse into a single registration.
     @Test func concurrentPairsWithSameTokensRegisterOnce() async {
-        let counter = RequestCounter()
+        let counter = Box<Int>(0)
         let service = makeService(counter: counter)
         async let first = service.pair(params: params, deviceToken: "t")
         async let second = service.pair(params: params, deviceToken: "t")
         _ = await [first, second]
-        #expect(counter.count == 1)
+        #expect(counter.value == 1)
     }
 
     /// A refreshed APNs token is a different registration and must not be
     /// swallowed by the dedupe guard.
     @Test func newDeviceTokenRegistersAgain() async {
-        let counter = RequestCounter()
+        let counter = Box<Int>(0)
         let service = makeService(counter: counter)
         _ = await service.pair(params: params, deviceToken: "t1")
         _ = await service.pair(params: params, deviceToken: "t2")
-        #expect(counter.count == 2)
+        #expect(counter.value == 2)
     }
 }
 

@@ -12,17 +12,6 @@ import Testing
 
 // MARK: - Helpers
 
-private func makeContact(_ name: String, _ emails: String...) -> Contact {
-    var contact = Contact(
-        uid: nil,
-        name: name,
-        avatarUrl: nil,
-        createdAt: Date(),
-        updatedAt: Date()
-    )
-    contact.emails = emails.map { ContactLabeledValue(label: nil, value: $0) }
-    return contact
-}
 
 private func index(_ contacts: Contact...) -> ContactSearchIndex {
     ContactSearchIndex(contacts: contacts)

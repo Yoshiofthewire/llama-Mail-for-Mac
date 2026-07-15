@@ -14,38 +14,6 @@ import Testing
 
 // MARK: - Helpers
 
-private func stubClient(
-    status: Int = 200,
-    json: String = "{}",
-    onRequest: (@Sendable (URLRequest) -> Void)? = nil
-) -> HTTPClient {
-    HTTPClient { request in
-        onRequest?(request)
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: status,
-            httpVersion: nil,
-            headerFields: nil
-        )!
-        return (Data(json.utf8), response)
-    }
-}
-
-/// Captures the request a client issued, for asserting on URL/headers/body.
-private final class RequestCapture: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored: URLRequest?
-
-    func record(_ request: URLRequest) {
-        lock.lock(); defer { lock.unlock() }
-        stored = request
-    }
-
-    var request: URLRequest? {
-        lock.lock(); defer { lock.unlock() }
-        return stored
-    }
-}
 
 private let tokenJSON = #"""
 {
@@ -88,15 +56,15 @@ private func activeSession() -> DesktopSession {
 
 @Suite struct PgpQrClientTests {
     @Test func fetchTokenSendsBearerHeaderToTheTokenEndpoint() async throws {
-        let capture = RequestCapture()
-        let client = PgpQrClient(httpClient: stubClient(json: tokenJSON) { capture.record($0) })
+        let capture = Box<URLRequest?>(nil)
+        let client = PgpQrClient(httpClient: stubClient(json: tokenJSON) { capture.value = $0 })
 
         _ = try await client.fetchToken(
             serverUrl: "https://mail.example.com",
             headers: ["Authorization": "Bearer sess-123"]
         )
 
-        let request = try #require(capture.request)
+        let request = try #require(capture.value)
         #expect(request.url?.absoluteString == "https://mail.example.com/api/pgp/qr/token")
         #expect(request.httpMethod == "GET")
         #expect(
@@ -125,13 +93,13 @@ private func activeSession() -> DesktopSession {
     }
 
     @Test func fetchKeyHitsTheScannedURLVerbatimWithNoAuth() async throws {
-        let capture = RequestCapture()
-        let client = PgpQrClient(httpClient: stubClient(json: keyJSON) { capture.record($0) })
+        let capture = Box<URLRequest?>(nil)
+        let client = PgpQrClient(httpClient: stubClient(json: keyJSON) { capture.value = $0 })
         let scanned = try #require(URL(string: "https://mail.example.com/api/pgp/qr/key?t=tok-abc"))
 
         let key = try await client.fetchKey(from: scanned)
 
-        let request = try #require(capture.request)
+        let request = try #require(capture.value)
         #expect(request.url == scanned)
         // The ?t= token is the only credential; attaching pairing auth here
         // would leak this device's credentials to someone else's server.
@@ -239,16 +207,16 @@ private func activeSession() -> DesktopSession {
     }
 
     @Test func withoutADesktopSessionItAsksForPairingAndNeverCallsTheServer() async throws {
-        let capture = RequestCapture()
+        let capture = Box<URLRequest?>(nil)
         let viewModel = MyPgpQrViewModel(
-            client: PgpQrClient(httpClient: stubClient(json: tokenJSON) { capture.record($0) }),
+            client: PgpQrClient(httpClient: stubClient(json: tokenJSON) { capture.value = $0 }),
             sessionStore: try makeSessionStore(session: nil)
         )
 
         await viewModel.refresh()
 
         #expect(viewModel.state == .needsPairing)
-        #expect(capture.request == nil)
+        #expect(capture.value == nil)
     }
 
     @Test func anExpiredSessionCountsAsNoSession() async throws {
@@ -320,12 +288,7 @@ private func activeSession() -> DesktopSession {
         onRequest: (@Sendable (URLRequest) -> Void)? = nil
     ) throws -> Environment {
         let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
-        let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-        let pairingStore = SecurePairingStore(keychain: keychain)
-        try pairingStore.savePairing(Pairing(
-            sub: "u1", hash: "h1", srv: "https://relay.example.com",
-            registrationUrl: nil, pairingToken: "pt", lastDeviceId: nil, pairedAt: Date()
-        ))
+        let pairingStore = try makePairedStore()
         let db = try AppDatabase(inMemory: true)
         let dao = ContactDAO(modelContainer: db.container)
         let http = stubClient(status: status, json: json, onRequest: onRequest)
@@ -361,8 +324,8 @@ private func activeSession() -> DesktopSession {
     }
 
     @Test func aNonKeyQRCodeFailsWithoutTouchingTheNetwork() async throws {
-        let capture = RequestCapture()
-        let env = try makeEnvironment { capture.record($0) }
+        let capture = Box<URLRequest?>(nil)
+        let env = try makeEnvironment { capture.value = $0 }
 
         await env.viewModel.handleScannedPayload("https://example.com/something-else")
 
@@ -371,7 +334,7 @@ private func activeSession() -> DesktopSession {
             return
         }
         #expect(canRescan)
-        #expect(capture.request == nil)
+        #expect(capture.value == nil)
     }
 
     // /key has no auth middleware, so .unauthorized here can only be its 403.
@@ -448,9 +411,9 @@ private func activeSession() -> DesktopSession {
     }
 
     @Test func theAttachedKeyReachesTheServerOnTheNextPush() async throws {
-        let capture = RequestCapture()
+        let capture = Box<URLRequest?>(nil)
         let env = try makeEnvironment(json: keyJSON) { request in
-            if request.httpMethod == "POST" { capture.record(request) }
+            if request.httpMethod == "POST" { capture.value = request }
         }
         await env.viewModel.handleScannedPayload("https://mail.example.com/api/pgp/qr/key?t=abc")
         guard case .confirming(let key) = env.viewModel.state else {
@@ -463,7 +426,7 @@ private func activeSession() -> DesktopSession {
         // body that went up.
         _ = try? await env.repository.sync()
 
-        let body = try #require(capture.request?.httpBody)
+        let body = try #require(capture.value?.httpBody)
         let json = String(decoding: body, as: UTF8.self)
         #expect(json.contains("\"pgpKey\""))
         #expect(json.contains("BEGIN PGP PUBLIC KEY BLOCK"))

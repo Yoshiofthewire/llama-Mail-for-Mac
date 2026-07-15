@@ -12,22 +12,6 @@ import Testing
 
 // MARK: - Helpers
 
-private func stubClient(
-    status: Int,
-    json: String = "{}",
-    onRequest: (@Sendable (URLRequest) -> Void)? = nil
-) -> HTTPClient {
-    HTTPClient { request in
-        onRequest?(request)
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: status,
-            httpVersion: nil,
-            headerFields: nil
-        )!
-        return (Data(json.utf8), response)
-    }
-}
 
 /// Sample code from the guide (32 chars, alphanumeric).
 private let validCode = "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6"
@@ -39,20 +23,13 @@ private let validDesktopLink = URL(
 
 @MainActor
 @Suite struct DesktopPairingServiceDedupeTests {
-    private final class RequestCounter: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value = 0
-        func increment() { lock.lock(); value += 1; lock.unlock() }
-        var count: Int { lock.lock(); defer { lock.unlock() }; return value }
-    }
-
-    private func makeService(counter: RequestCounter) -> DesktopPairingService {
+    private func makeService(counter: Box<Int>) -> DesktopPairingService {
         let json = """
         {"ok": true, "sessionToken": "jwt-token", "expiresIn": 86400, \
         "userId": "u1", "userEmail": "user@example.com"}
         """
         let client = HTTPClient { request in
-            counter.increment()
+            counter.mutate { $0 += 1 }
             try? await Task.sleep(for: .milliseconds(10))
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -77,12 +54,12 @@ private let validDesktopLink = URL(
     /// The deep link is delivered to every open window and each auto-pairs;
     /// concurrent calls with one code must collapse into one registration.
     @Test func concurrentPairsWithSameCodeRegisterOnce() async {
-        let counter = RequestCounter()
+        let counter = Box<Int>(0)
         let service = makeService(counter: counter)
         async let first = service.pair(params: params)
         async let second = service.pair(params: params)
         let outcomes = await [first, second]
-        #expect(counter.count == 1)
+        #expect(counter.value == 1)
         let expected = DesktopRegistrationOutcome.success(DesktopRegistrationResponse(
             ok: true, sessionToken: "jwt-token", expiresIn: 86400,
             userId: "u1", userEmail: "user@example.com"
@@ -91,11 +68,11 @@ private let validDesktopLink = URL(
     }
 
     @Test func repeatPairWithSameCodeReusesOutcome() async {
-        let counter = RequestCounter()
+        let counter = Box<Int>(0)
         let service = makeService(counter: counter)
         let first = await service.pair(params: params)
         let second = await service.pair(params: params)
-        #expect(counter.count == 1)
+        #expect(counter.value == 1)
         #expect(first == second)
     }
 }

@@ -14,22 +14,6 @@ import Testing
 
 // MARK: - Helpers
 
-private func stubClient(
-    status: Int = 200,
-    json: String = "{}",
-    onRequest: (@Sendable (URLRequest) -> Void)? = nil
-) -> HTTPClient {
-    HTTPClient { request in
-        onRequest?(request)
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: status,
-            httpVersion: nil,
-            headerFields: nil
-        )!
-        return (Data(json.utf8), response)
-    }
-}
 
 private func makeContact(
     uid: String? = nil,
@@ -196,14 +180,7 @@ private func makeDTO(
 
     private func makeEnvironment(client: HTTPClient, paired: Bool = true) throws -> Environment {
         let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
-        let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-        let pairingStore = SecurePairingStore(keychain: keychain)
-        if paired {
-            try pairingStore.savePairing(Pairing(
-                sub: "u1", hash: "h1", srv: "https://relay.example.com",
-                registrationUrl: nil, pairingToken: "pt", lastDeviceId: nil, pairedAt: Date()
-            ))
-        }
+        let pairingStore = try makePairedStore(paired: paired)
         let db = try AppDatabase(inMemory: true)
         let dao = ContactDAO(modelContainer: db.container)
         let cursorStore = ContactCursorStore(defaults: defaults)
@@ -240,13 +217,7 @@ private func makeDTO(
     }
 
     @Test func concurrentSyncsPushPendingContactOnlyOnce() async throws {
-        final class MethodLog: @unchecked Sendable {
-            private let lock = NSLock()
-            private var value: [String] = []
-            func append(_ method: String) { lock.lock(); value.append(method); lock.unlock() }
-            var methods: [String] { lock.lock(); defer { lock.unlock() }; return value }
-        }
-        let log = MethodLog()
+        let log = Box<[String]>([])
         // The echo lets the first sync reconcile the create; a response
         // without it would leave the create pending (retried by design).
         let json = """
@@ -258,7 +229,7 @@ private func makeDTO(
         }
         """
         let env = try makeEnvironment(client: stubClient(json: json) { request in
-            log.append(request.httpMethod ?? "")
+            log.mutate { $0.append(request.httpMethod ?? "") }
         })
         try await env.repository.saveContact(makeContact(name: "Ada", email: "ada@example.com"))
 
@@ -269,7 +240,7 @@ private func makeDTO(
         // Serialized: the first sync pushes the pending create; the second
         // runs after it and has nothing queued, so it pulls. Overlapping
         // syncs would push the same contact twice (server-side duplicate).
-        #expect(log.methods == ["POST", "GET"])
+        #expect(log.value == ["POST", "GET"])
     }
 
     @Test func fullSyncAssignsUidWithoutDuplicating() async throws {
@@ -585,15 +556,9 @@ private func makeDTO(
     }
 
     @Test func pushBodyCarriesEveryPayloadField() async throws {
-        final class BodyCapture: @unchecked Sendable {
-            private let lock = NSLock()
-            private var value = ""
-            func set(_ body: String) { lock.lock(); value = body; lock.unlock() }
-            var body: String { lock.lock(); defer { lock.unlock() }; return value }
-        }
-        let capture = BodyCapture()
+        let capture = Box<String>("")
         let env = try makeEnvironment(client: stubClient(json: #"{"cursor": 1}"#) { request in
-            capture.set(request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? "")
+            capture.value = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
         })
 
         var contact = makeContact(name: "Ada Lovelace", email: "ada@example.com")
@@ -626,7 +591,7 @@ private func makeDTO(
 
         // The server replaces the whole contact on push, so every payload key
         // must be on the wire or an edit here wipes web-entered data.
-        let body = capture.body
+        let body = capture.value
         for fragment in [
             #""fn":"Ada Lovelace""#,
             #""givenName":"Ada""#,

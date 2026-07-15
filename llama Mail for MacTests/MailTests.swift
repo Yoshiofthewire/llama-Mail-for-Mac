@@ -13,25 +13,8 @@ import Testing
 
 // MARK: - Helpers
 
-private func stubClient(
-    status: Int = 200,
-    json: String = "{}",
-    onRequest: (@Sendable (URLRequest) -> Void)? = nil
-) -> HTTPClient {
-    HTTPClient { request in
-        onRequest?(request)
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: status,
-            httpVersion: nil,
-            headerFields: nil
-        )!
-        return (Data(json.utf8), response)
-    }
-}
 
 private let auth = RelayAuth(sub: "u1", hash: "h1")
-private let server = "https://relay.example.com"
 
 private func makeEmail(serverId: String, keywords: Set<String>) -> Email {
     Email(
@@ -421,19 +404,7 @@ private func makeOutgoing(
         client: HTTPClient,
         paired: Bool
     ) throws -> MailRepository {
-        let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-        let pairingStore = SecurePairingStore(keychain: keychain)
-        if paired {
-            try pairingStore.savePairing(Pairing(
-                sub: "u1",
-                hash: "h1",
-                srv: server,
-                registrationUrl: nil,
-                pairingToken: "pt",
-                lastDeviceId: nil,
-                pairedAt: Date()
-            ))
-        }
+        let pairingStore = try makePairedStore(paired: paired)
         let db = try AppDatabase(inMemory: true)
         return MailRepository(
             securePairingStore: pairingStore,
@@ -472,12 +443,7 @@ private func makeOutgoing(
 
 @Suite struct SendEmailUseCaseTests {
     private func makeUseCase(client: HTTPClient) throws -> SendEmailUseCase {
-        let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-        let pairingStore = SecurePairingStore(keychain: keychain)
-        try pairingStore.savePairing(Pairing(
-            sub: "u1", hash: "h1", srv: server, registrationUrl: nil,
-            pairingToken: "pt", lastDeviceId: nil, pairedAt: Date()
-        ))
+        let pairingStore = try makePairedStore()
         let db = try AppDatabase(inMemory: true)
         return SendEmailUseCase(repository: MailRepository(
             securePairingStore: pairingStore,

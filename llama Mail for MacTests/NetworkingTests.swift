@@ -14,22 +14,6 @@ import Testing
 
 /// HTTPClient whose transport returns a canned response; `onRequest` lets
 /// tests assert on the outgoing request.
-private func stubClient(
-    status: Int,
-    json: String = "{}",
-    onRequest: (@Sendable (URLRequest) -> Void)? = nil
-) -> HTTPClient {
-    HTTPClient { request in
-        onRequest?(request)
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: status,
-            httpVersion: nil,
-            headerFields: nil
-        )!
-        return (Data(json.utf8), response)
-    }
-}
 
 private let validPairingLink = URL(
     string: "llamalabels://native-pair?sub=user1&hash=abc123&srv=https://relay.example.com&pt=token9"
