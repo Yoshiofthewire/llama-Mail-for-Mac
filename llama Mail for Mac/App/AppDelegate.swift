@@ -98,10 +98,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(
         _ application: UIApplication,
-        didReceiveRemoteNotification userInfo: [AnyHashable: Any]
-    ) async -> UIBackgroundFetchResult {
-        await PushLifecycle.onRemoteNotification(userInfo)
-        return .newData
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        Task {
+            await PushLifecycle.onRemoteNotification(userInfo)
+            completionHandler(.newData)
+        }
     }
 
     // MARK: - Background pull (spec §3 pull mode)

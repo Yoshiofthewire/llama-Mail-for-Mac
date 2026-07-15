@@ -15,7 +15,7 @@ import SwiftUI
 /// This exists for the text field trailing the pills: measured with an
 /// unspecified proposal it reports an enormous ideal width, so a greedy
 /// line-breaker always bumps it to a line of its own.
-private struct FlowGreedyKey: LayoutValueKey {
+private nonisolated struct FlowGreedyKey: LayoutValueKey {
     static let defaultValue = false
 }
 

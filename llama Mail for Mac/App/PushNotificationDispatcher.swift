@@ -15,7 +15,8 @@ import UserNotifications
 @MainActor
 final class PushNotificationDispatcher: NSObject {
     static let mailCategoryId = "MAIL_NOTIFICATION"
-    static let mfaCategoryId = "MFA_CHALLENGE"
+    // Nonisolated: read from the nonisolated willPresent delegate callback.
+    nonisolated static let mfaCategoryId = "MFA_CHALLENGE"
     static let approveActionId = "APPROVE"
     static let denyActionId = "DENY"
 

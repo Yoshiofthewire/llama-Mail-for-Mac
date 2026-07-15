@@ -32,7 +32,7 @@ private final class MockSystemContactStore: SystemContactStoring {
 
     func fetch(identifier: String) throws -> CNContact? { cards[identifier] }
 
-    func listAll() throws -> [CNContact] { Array(cards.values) }
+    func listAll() async throws -> [CNContact] { Array(cards.values) }
 
     func add(_ contact: CNMutableContact) throws {
         addCount += 1
