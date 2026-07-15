@@ -13,6 +13,22 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Bundled fonts (STYLE_GUIDE §2). Copy Bundle Resources flattens the
+	     Resources/Fonts group, so iOS names the files directly and macOS
+	     points at the Resources directory itself. -->
+	<key>UIAppFonts</key>
+	<array>
+		<string>SpaceGrotesk-Regular.ttf</string>
+		<string>SpaceGrotesk-Medium.ttf</string>
+		<string>SpaceGrotesk-SemiBold.ttf</string>
+		<string>SpaceGrotesk-Bold.ttf</string>
+		<string>IBMPlexMono-Regular.ttf</string>
+		<string>IBMPlexMono-Medium.ttf</string>
+		<string>IBMPlexMono-SemiBold.ttf</string>
+		<string>IBMPlexMono-Bold.ttf</string>
+	</array>
+	<key>ATSApplicationFontsPath</key>
+	<string>.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>llama Mail uses the camera to scan pairing QR codes.</string>
 	<key>NSContactsUsageDescription</key>

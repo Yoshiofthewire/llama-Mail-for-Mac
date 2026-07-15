@@ -20,6 +20,11 @@ Domain.
 - **Fonts carry meaning**: `AppFont.ui` for names and prose, `AppFont.mono`
   for email addresses and other machine text. A bare address rendered in mono
   is the signal a recipient isn't in the address book.
+- **Only four font weights ship.** Space Grotesk and IBM Plex Mono are bundled
+  from `Resources/Fonts` in regular, medium, semibold, and bold only. Any other
+  `AppFont` weight silently resolves to the nearest bundled face — add the TTF
+  and list it in `UIAppFonts` before using one. The bundle is flat, so
+  `ATSApplicationFontsPath` is `.` and `UIAppFonts` carries bare filenames.
 - **New pure value types must be declared `nonisolated`.** The target defaults
   to MainActor isolation (`SWIFT_DEFAULT_ACTOR_ISOLATION`), which infers
   isolated conformances; SwiftData casts codable composites off the main actor

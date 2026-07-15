@@ -43,45 +43,18 @@ extension EnvironmentValues {
 
 // MARK: - Typography (STYLE_GUIDE §2)
 
-/// ponytail: Space Grotesk / IBM Plex Mono should ship as bundled fonts in v2
-/// (iOS has no Google Fonts provider like Android). Until the TTFs are added
-/// to the bundle these resolve to the system font, which the style guide
-/// accepts ("stay native wins"); the custom names are tried first so dropping
-/// the fonts in later requires no code change.
+/// Space Grotesk and IBM Plex Mono ship in the bundle (Resources/Fonts,
+/// registered via UIAppFonts / ATSApplicationFontsPath), so the family name
+/// always resolves. Only the four weights the app asks for are bundled —
+/// regular, medium, semibold, bold — and CoreText matches `.weight()` to the
+/// matching static face. A weight outside that set resolves to the nearest
+/// bundled one rather than a synthesized face, so add the TTF before using it.
 enum AppFont {
     static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        custom("Space Grotesk", size: size, weight: weight, fallbackDesign: .default)
+        .custom("Space Grotesk", size: size).weight(weight)
     }
 
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        custom("IBM Plex Mono", size: size, weight: weight, fallbackDesign: .monospaced)
-    }
-
-    private static func custom(
-        _ name: String,
-        size: CGFloat,
-        weight: Font.Weight,
-        fallbackDesign: Font.Design
-    ) -> Font {
-        if isFontAvailable(name) {
-            return .custom(name, size: size).weight(weight)
-        }
-        return .system(size: size, weight: weight, design: fallbackDesign)
-    }
-
-    private static func isFontAvailable(_ name: String) -> Bool {
-#if canImport(UIKit)
-        UIFont(name: name, size: 12) != nil
-#elseif canImport(AppKit)
-        NSFont(name: name, size: 12) != nil
-#else
-        false
-#endif
+        .custom("IBM Plex Mono", size: size).weight(weight)
     }
 }
-
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
