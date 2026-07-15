@@ -194,8 +194,7 @@ private func makeEmail(
         var contact = Contact(
             uid: nil,
             name: "Ada Lovelace",
-            email: "ada@example.com",
-            phone: "",
+            emails: [ContactLabeledValue(label: nil, value: "ada@example.com")],
             avatarUrl: nil,
             createdAt: Date(),
             updatedAt: Date()
@@ -221,8 +220,7 @@ private func makeEmail(
         let contact = Contact(
             uid: "srv-9",
             name: "Grace Hopper",
-            email: "grace@example.com",
-            phone: "",
+            emails: [ContactLabeledValue(label: nil, value: "grace@example.com")],
             avatarUrl: nil,
             createdAt: Date(),
             updatedAt: Date()

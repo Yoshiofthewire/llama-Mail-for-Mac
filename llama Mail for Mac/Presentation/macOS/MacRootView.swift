@@ -283,7 +283,7 @@ struct MacRootView: View {
                             Text(contact.name)
                                 .font(AppFont.ui(14, weight: .medium))
                                 .foregroundStyle(theme.inkStrong)
-                            Text(contact.email)
+                            Text(contact.primaryEmail)
                                 .font(AppFont.mono(11))
                                 .foregroundStyle(theme.ink.opacity(0.8))
                         }
@@ -308,6 +308,26 @@ struct MacRootView: View {
                         Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                     }
                 }
+            }
+            ToolbarItem {
+                Button {
+                    Task { await contactsViewModel.dedupe() }
+                } label: {
+                    Label("Find Duplicates", systemImage: "person.crop.circle.badge.checkmark")
+                }
+                .disabled(contactsViewModel.isSyncing)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let message = contactsViewModel.statusMessage {
+                Text(message)
+                    .font(AppFont.ui(13))
+                    .foregroundStyle(theme.inkStrong)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(theme.panel, in: Capsule())
+                    .overlay(Capsule().strokeBorder(theme.line, lineWidth: 1))
+                    .padding(.bottom, 10)
             }
         }
     }

@@ -104,19 +104,24 @@ final class SystemContactsExporter {
     private let baselineStore: SystemContactsBaselineStore
     private let settings: ContactsSettingsStore
     private let contactDAO: ContactDAO
+    /// Cached server photo bytes written onto cards; nil in tests that don't
+    /// exercise photos.
+    private let photoCache: ContactPhotoCache?
 
     init(
         store: SystemContactStoring,
         linkStore: SystemContactsLinkStore,
         baselineStore: SystemContactsBaselineStore,
         settings: ContactsSettingsStore,
-        contactDAO: ContactDAO
+        contactDAO: ContactDAO,
+        photoCache: ContactPhotoCache? = nil
     ) {
         self.store = store
         self.linkStore = linkStore
         self.baselineStore = baselineStore
         self.settings = settings
         self.contactDAO = contactDAO
+        self.photoCache = photoCache
     }
 
     // MARK: - Authorization
@@ -336,8 +341,13 @@ final class SystemContactsExporter {
         }
     }
 
+    private func photoData(for contact: Contact) -> Data? {
+        guard let photoRef = contact.photoRef, !photoRef.isEmpty else { return nil }
+        return photoCache?.data(for: photoRef)
+    }
+
     private func create(_ contact: Contact, summary: inout Summary) {
-        let cn = SystemContactMapper.makeContact(from: contact)
+        let cn = SystemContactMapper.makeContact(from: contact, photoData: photoData(for: contact))
         do {
             try store.add(cn)
             linkStore.upsert(SystemContactLink(
@@ -358,7 +368,7 @@ final class SystemContactsExporter {
         do {
             if let existing = try store.fetch(identifier: cnIdentifier),
                let mutable = existing.mutableCopy() as? CNMutableContact {
-                SystemContactMapper.apply(contact, to: mutable)
+                SystemContactMapper.apply(contact, to: mutable, photoData: photoData(for: contact))
                 try store.update(mutable)
                 linkStore.upsert(SystemContactLink(
                     localId: contact.localId,

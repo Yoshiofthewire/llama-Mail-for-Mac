@@ -25,7 +25,7 @@
 
 /* Begin PBXFileReference section */
 		927A36E2300148DB0090B7AF /* llama Mail for Mac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "llama Mail for Mac.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		927A36F3300148DC0090B7AF /* llama Mail for MacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "llama Mail for MacTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		927A36F3300148DC0090B7AF /* llama Mail forMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "llama Mail forMacTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		927A36FD300148DC0090B7AF /* llama Mail for MacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "llama Mail for MacUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -99,7 +99,7 @@
 			isa = PBXGroup;
 			children = (
 				927A36E2300148DB0090B7AF /* llama Mail for Mac.app */,
-				927A36F3300148DC0090B7AF /* llama Mail for MacTests.xctest */,
+				927A36F3300148DC0090B7AF /* llama Mail forMacTests.xctest */,
 				927A36FD300148DC0090B7AF /* llama Mail for MacUITests.xctest */,
 			);
 			name = Products;
@@ -130,9 +130,9 @@
 			productReference = 927A36E2300148DB0090B7AF /* llama Mail for Mac.app */;
 			productType = "com.apple.product-type.application";
 		};
-		927A36F2300148DC0090B7AF /* llama Mail for MacTests */ = {
+		927A36F2300148DC0090B7AF /* llama Mail forMacTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 927A370B300148DC0090B7AF /* Build configuration list for PBXNativeTarget "llama Mail for MacTests" */;
+			buildConfigurationList = 927A370B300148DC0090B7AF /* Build configuration list for PBXNativeTarget "llama Mail forMacTests" */;
 			buildPhases = (
 				927A36EF300148DC0090B7AF /* Sources */,
 				927A36F0300148DC0090B7AF /* Frameworks */,
@@ -146,11 +146,11 @@
 			fileSystemSynchronizedGroups = (
 				927A36F6300148DC0090B7AF /* llama Mail for MacTests */,
 			);
-			name = "llama Mail for MacTests";
+			name = "llama Mail forMacTests";
 			packageProductDependencies = (
 			);
 			productName = "llama Mail for MacTests";
-			productReference = 927A36F3300148DC0090B7AF /* llama Mail for MacTests.xctest */;
+			productReference = 927A36F3300148DC0090B7AF /* llama Mail forMacTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
 		927A36FC300148DC0090B7AF /* llama Mail for MacUITests */ = {
@@ -214,7 +214,7 @@
 			projectRoot = "";
 			targets = (
 				927A36E1300148DB0090B7AF /* llama Mail for Mac */,
-				927A36F2300148DC0090B7AF /* llama Mail for MacTests */,
+				927A36F2300148DC0090B7AF /* llama Mail forMacTests */,
 				927A36FC300148DC0090B7AF /* llama Mail for MacUITests */,
 			);
 		};
@@ -297,6 +297,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "llama Mail for Mac/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "llama Mail";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -313,7 +314,8 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.urlxl.mail;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_MODULE_NAME = llama_Mail_for_Mac;
+				PRODUCT_NAME = "llama Mail";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -343,6 +345,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "llama Mail for Mac/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "llama Mail";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -359,7 +362,8 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.urlxl.mail;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_MODULE_NAME = llama_Mail_for_Mac;
+				PRODUCT_NAME = "llama Mail";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -511,7 +515,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/llama Mail for Mac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/llama Mail for Mac";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/llama Mail.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/llama Mail";
 				XROS_DEPLOYMENT_TARGET = 26.5;
 			};
 			name = Debug;
@@ -537,7 +541,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/llama Mail for Mac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/llama Mail for Mac";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/llama Mail.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/llama Mail";
 				XROS_DEPLOYMENT_TARGET = 26.5;
 			};
 			name = Release;
@@ -613,7 +617,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		927A370B300148DC0090B7AF /* Build configuration list for PBXNativeTarget "llama Mail for MacTests" */ = {
+		927A370B300148DC0090B7AF /* Build configuration list for PBXNativeTarget "llama Mail forMacTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				927A370C300148DC0090B7AF /* Debug */,

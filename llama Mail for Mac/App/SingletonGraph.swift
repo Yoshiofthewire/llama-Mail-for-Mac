@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import os
 
 @MainActor
 final class SingletonGraph {
@@ -61,12 +62,14 @@ final class SingletonGraph {
     )
     lazy var keywordRepository = KeywordRepository(settingsStore: keywordSettingsStore)
     lazy var sendEmailUseCase = SendEmailUseCase(repository: mailRepository)
+    let contactPhotoCache = ContactPhotoCache()
     lazy var systemContactsExporter = SystemContactsExporter(
         store: LiveSystemContactStore(),
         linkStore: systemContactsLinkStore,
         baselineStore: systemContactsBaselineStore,
         settings: contactsSettingsStore,
-        contactDAO: contactDAO
+        contactDAO: contactDAO,
+        photoCache: contactPhotoCache
     )
     lazy var systemContactsChangeMonitor = SystemContactsChangeMonitor(
         exporter: systemContactsExporter,
@@ -78,7 +81,8 @@ final class SingletonGraph {
         cursorStore: contactCursorStore,
         pendingDeletesStore: contactPendingDeletesStore,
         securePairingStore: securePairingStore,
-        systemContactsExporter: systemContactsExporter
+        systemContactsExporter: systemContactsExporter,
+        photoCache: contactPhotoCache
     )
     lazy var pushRepository = PushRepository(
         dao: pushNotificationDAO,
@@ -126,11 +130,29 @@ final class SingletonGraph {
 
     let deepLinkHandler = DeepLinkHandler()
 
+    // MARK: - Startup migrations
+
+    private static let legacyContactFieldsMigratedKey = "contacts.legacyFieldsMigrated"
+    private let userDefaults: UserDefaults
+
+    /// One-time data backfills after schema migrations (currently the
+    /// V1→V2 legacy email/phone → arrays copy). Safe to call every launch.
+    func runStartupMigrationsIfNeeded() async {
+        guard !userDefaults.bool(forKey: Self.legacyContactFieldsMigratedKey) else { return }
+        do {
+            try await contactDAO.migrateLegacyFields()
+            userDefaults.set(true, forKey: Self.legacyContactFieldsMigratedKey)
+        } catch {
+            Log.sync.error("Contact legacy-field backfill failed: \(error.localizedDescription)")
+        }
+    }
+
     init(
         userDefaults: UserDefaults = .standard,
         keychain: KeychainStorage = KeychainStorage(),
         database: AppDatabase? = nil
     ) throws {
+        self.userDefaults = userDefaults
         self.database = try database ?? AppDatabase()
         self.keychain = keychain
         securePairingStore = SecurePairingStore(keychain: keychain)

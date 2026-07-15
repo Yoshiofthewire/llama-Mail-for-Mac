@@ -31,7 +31,7 @@ struct ContactsListView: View {
                                 Text(contact.name)
                                     .font(AppFont.ui(15, weight: .medium))
                                     .foregroundStyle(theme.inkStrong)
-                                Text(contact.email)
+                                Text(contact.primaryEmail)
                                     .font(AppFont.mono(12))
                                     .foregroundStyle(theme.ink.opacity(0.8))
                             }
@@ -73,6 +73,14 @@ struct ContactsListView: View {
                         Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                     }
                 }
+            }
+            ToolbarItem {
+                Button {
+                    Task { await viewModel.dedupe() }
+                } label: {
+                    Label("Find Duplicates", systemImage: "person.crop.circle.badge.checkmark")
+                }
+                .disabled(viewModel.isSyncing)
             }
         }
         .sheet(isPresented: $showNewContact) {

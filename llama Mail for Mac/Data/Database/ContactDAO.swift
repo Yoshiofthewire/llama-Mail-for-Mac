@@ -19,9 +19,7 @@ actor ContactDAO {
                 existing.uid = contact.uid ?? existing.uid
                 existing.rev = contact.rev
                 existing.name = contact.name
-                existing.email = contact.email
-                existing.phone = contact.phone
-                existing.avatarUrl = contact.avatarUrl
+                existing.applyFields(from: contact)
                 existing.updatedAt = contact.updatedAt
                 existing.needsSync = contact.needsSync
             } else {
@@ -29,6 +27,31 @@ actor ContactDAO {
             }
         }
         try modelContext.save()
+    }
+
+    /// One-time V1→V2 backfill: the legacy single email/phone strings become
+    /// the first labeled value of the new arrays. Idempotent — rows already
+    /// carrying arrays (or with empty legacy fields) are untouched, and the
+    /// legacy fields are cleared once copied. Filters in memory because
+    /// #Predicate can't see inside the encoded array columns.
+    func migrateLegacyFields() throws {
+        let entities = try modelContext.fetch(FetchDescriptor<ContactEntity>())
+        var changed = false
+        for entity in entities {
+            if entity.emails.isEmpty, !entity.legacyEmail.isEmpty {
+                entity.emails = [ContactLabeledValue(label: nil, value: entity.legacyEmail)]
+                entity.legacyEmail = ""
+                changed = true
+            }
+            if entity.phones.isEmpty, !entity.legacyPhone.isEmpty {
+                entity.phones = [ContactLabeledValue(label: nil, value: entity.legacyPhone)]
+                entity.legacyPhone = ""
+                changed = true
+            }
+        }
+        if changed {
+            try modelContext.save()
+        }
     }
 
     // MARK: - Sync support (spec §4)

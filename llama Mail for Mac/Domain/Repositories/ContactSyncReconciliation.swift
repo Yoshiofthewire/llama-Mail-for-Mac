@@ -34,7 +34,7 @@ enum ContactSyncReconciliation {
 
         for contact in localPending where contact.uid == nil {
             if let index = candidates.firstIndex(where: {
-                $0.fn == contact.name && $0.primaryEmail == contact.email
+                $0.fn == contact.name && $0.primaryEmail == contact.primaryEmail
             }) {
                 assignments.append(Assignment(localId: contact.localId, uid: candidates[index].uid!))
                 candidates.remove(at: index)

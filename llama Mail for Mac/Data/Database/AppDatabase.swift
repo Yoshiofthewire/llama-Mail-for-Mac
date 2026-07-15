@@ -20,14 +20,13 @@ final class AppDatabase: Sendable {
 
     /// - Parameter inMemory: true for tests; no data is written to disk.
     init(inMemory: Bool = false) throws {
-        // ponytail: no SchemaMigrationPlan yet — add a VersionedSchema +
-        // migration plan when the first schema change lands.
         let configuration = ModelConfiguration(
             schema: Self.schema,
             isStoredInMemoryOnly: inMemory
         )
         container = try ModelContainer(
             for: Self.schema,
+            migrationPlan: AppMigrationPlan.self,
             configurations: [configuration]
         )
     }

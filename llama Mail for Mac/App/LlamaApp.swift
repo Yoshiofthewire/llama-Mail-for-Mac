@@ -82,6 +82,9 @@ struct LlamaApp: App {
                         router?.handle(action)
                     }
                 }
+                .task {
+                    await graph.runStartupMigrationsIfNeeded()
+                }
         }
         .modelContainer(graph.database.container)
     }

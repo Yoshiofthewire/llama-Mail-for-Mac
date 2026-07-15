@@ -2,7 +2,10 @@
 //  ContactEntity.swift
 //  llama Mail
 //
-//  SwiftData entity for the contacts table (spec §8).
+//  SwiftData entity for the contacts table (spec §8), schema V2: full
+//  contactPayload parity (Client_Contact_Update.md). Array fields are Codable
+//  composites — fine for storage, but #Predicate can't see inside them; all
+//  queries stay on localId/uid/needsSync.
 //
 
 import Foundation
@@ -18,8 +21,36 @@ final class ContactEntity {
     /// Server revision for sync conflict detection; 0 until first sync.
     var rev: Int = 0
     var name: String
-    var email: String
-    var phone: String
+    /// V1 single-value columns, kept only so the V1→V2 migration stays
+    /// lightweight. ContactDAO.migrateLegacyFields() backfills them into
+    /// `emails`/`phones` once at startup; drop in V3.
+    @Attribute(originalName: "email") var legacyEmail: String = ""
+    @Attribute(originalName: "phone") var legacyPhone: String = ""
+    var givenName: String = ""
+    var familyName: String = ""
+    var middleName: String = ""
+    var prefix: String = ""
+    var suffix: String = ""
+    var nickname: String = ""
+    var org: String = ""
+    var title: String = ""
+    var emails: [ContactLabeledValue] = []
+    var phones: [ContactLabeledValue] = []
+    var addresses: [ContactPostalAddress] = []
+    var notes: String = ""
+    var birthday: String = ""
+    var photoRef: String?
+    var groupIDs: [String] = []
+    var pgpKey: String?
+    var ims: [ContactIM] = []
+    var websites: [ContactLabeledValue] = []
+    var relations: [ContactRelation] = []
+    var events: [ContactEvent] = []
+    var phoneticGivenName: String = ""
+    var phoneticFamilyName: String = ""
+    var department: String = ""
+    var customFields: [ContactCustomField] = []
+    var pronouns: String = ""
     var avatarUrl: String?
     var createdAt: Date
     var updatedAt: Date
@@ -31,9 +62,6 @@ final class ContactEntity {
         uid: String?,
         rev: Int = 0,
         name: String,
-        email: String,
-        phone: String,
-        avatarUrl: String?,
         createdAt: Date,
         updatedAt: Date,
         needsSync: Bool = false
@@ -42,9 +70,6 @@ final class ContactEntity {
         self.uid = uid
         self.rev = rev
         self.name = name
-        self.email = email
-        self.phone = phone
-        self.avatarUrl = avatarUrl
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.needsSync = needsSync
@@ -60,13 +85,42 @@ extension ContactEntity {
             uid: contact.uid,
             rev: contact.rev,
             name: contact.name,
-            email: contact.email,
-            phone: contact.phone,
-            avatarUrl: contact.avatarUrl,
             createdAt: contact.createdAt,
             updatedAt: contact.updatedAt,
             needsSync: contact.needsSync
         )
+        applyFields(from: contact)
+    }
+
+    /// Copies every payload field from the domain contact; shared by the
+    /// insert path above and ContactDAO.upsert's update path.
+    func applyFields(from contact: Contact) {
+        givenName = contact.givenName
+        familyName = contact.familyName
+        middleName = contact.middleName
+        prefix = contact.prefix
+        suffix = contact.suffix
+        nickname = contact.nickname
+        org = contact.org
+        title = contact.title
+        emails = contact.emails
+        phones = contact.phones
+        addresses = contact.addresses
+        notes = contact.notes
+        birthday = contact.birthday
+        photoRef = contact.photoRef
+        groupIDs = contact.groupIDs
+        pgpKey = contact.pgpKey
+        ims = contact.ims
+        websites = contact.websites
+        relations = contact.relations
+        events = contact.events
+        phoneticGivenName = contact.phoneticGivenName
+        phoneticFamilyName = contact.phoneticFamilyName
+        department = contact.department
+        customFields = contact.customFields
+        pronouns = contact.pronouns
+        avatarUrl = contact.avatarUrl
     }
 
     var toDomain: Contact {
@@ -75,8 +129,31 @@ extension ContactEntity {
             uid: uid,
             rev: rev,
             name: name,
-            email: email,
-            phone: phone,
+            givenName: givenName,
+            familyName: familyName,
+            middleName: middleName,
+            prefix: prefix,
+            suffix: suffix,
+            nickname: nickname,
+            org: org,
+            title: title,
+            emails: emails,
+            phones: phones,
+            addresses: addresses,
+            notes: notes,
+            birthday: birthday,
+            photoRef: photoRef,
+            groupIDs: groupIDs,
+            pgpKey: pgpKey,
+            ims: ims,
+            websites: websites,
+            relations: relations,
+            events: events,
+            phoneticGivenName: phoneticGivenName,
+            phoneticFamilyName: phoneticFamilyName,
+            department: department,
+            customFields: customFields,
+            pronouns: pronouns,
             avatarUrl: avatarUrl,
             createdAt: createdAt,
             updatedAt: updatedAt,

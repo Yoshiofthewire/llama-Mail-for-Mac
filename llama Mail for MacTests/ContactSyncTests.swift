@@ -2,11 +2,13 @@
 //  ContactSyncTests.swift
 //  llama Mail for MacTests
 //
-//  Phase 4 tests: reconciliation matching, cursor/tombstone stores, and the
-//  full sync flow through a stub transport.
+//  Phase 4 tests: reconciliation matching, cursor/tombstone stores, the
+//  full sync flow through a stub transport, and contactPayload field parity
+//  (Client_Contact_Update.md).
 //
 
 import Foundation
+import SwiftData
 import Testing
 @testable import llama_Mail_for_Mac
 
@@ -35,16 +37,18 @@ private func makeContact(
     email: String = "",
     needsSync: Bool = false
 ) -> Contact {
-    Contact(
+    var contact = Contact(
         uid: uid,
         name: name,
-        email: email,
-        phone: "",
         avatarUrl: nil,
         createdAt: Date(),
         updatedAt: Date(),
         needsSync: needsSync
     )
+    if !email.isEmpty {
+        contact.emails = [ContactLabeledValue(label: nil, value: email)]
+    }
+    return contact
 }
 
 // MARK: - Reconciliation
@@ -163,6 +167,7 @@ private func makeDTO(
     private struct Environment {
         var repository: ContactSyncRepository
         var dao: ContactDAO
+        var database: AppDatabase
         var cursorStore: ContactCursorStore
         var pendingDeletes: ContactPendingDeletesStore
     }
@@ -191,6 +196,7 @@ private func makeDTO(
         return Environment(
             repository: repository,
             dao: dao,
+            database: db,
             cursorStore: cursorStore,
             pendingDeletes: pendingDeletes
         )
@@ -319,7 +325,7 @@ private func makeDTO(
         #expect(env.pendingDeletes.all().isEmpty)
     }
 
-    @Test func serverEditUpdatesExistingContact() async throws {
+    @Test func serverEditReplacesContactWholesale() async throws {
         let json = """
         {
           "cursor": 9,
@@ -337,10 +343,12 @@ private func makeDTO(
         let all = try await env.dao.listAll()
         #expect(all.count == 1)
         #expect(all.first?.name == "Ada L.")
-        #expect(all.first?.phone == "555")
+        #expect(all.first?.primaryPhone == "555")
         #expect(all.first?.rev == 4)
-        // Fields absent from the delta keep their local values.
-        #expect(all.first?.email == "ada@example.com")
+        // Server `changed` entries are complete contacts: a field absent from
+        // the payload is empty server-side, so it clears locally too (keeping
+        // it would resurrect fields deleted on another device).
+        #expect(all.first?.emails.isEmpty == true)
     }
 
     @Test func tooOldResetsCursorAndCache() async throws {
@@ -352,5 +360,361 @@ private func makeDTO(
         #expect(summary.newCursor == 0)
         #expect(env.cursorStore.lastCursor == 0)
         #expect(try await env.dao.listAll().isEmpty)
+    }
+
+    // MARK: - Field parity (Client_Contact_Update.md)
+
+    @Test func pullDecodesEveryPayloadField() async throws {
+        let json = """
+        {
+          "cursor": 5,
+          "changed": [
+            {
+              "uid": "srv-full",
+              "rev": 3,
+              "fn": "Ada Lovelace",
+              "givenName": "Ada",
+              "familyName": "Lovelace",
+              "middleName": "M.",
+              "prefix": "Dr.",
+              "suffix": "PhD",
+              "nickname": "Addie",
+              "org": "Analytical Engines Ltd",
+              "title": "Chief Mathematician",
+              "emails": [
+                { "label": "home", "value": "ada@example.com" },
+                { "label": "work", "value": "ada@engines.example" }
+              ],
+              "phones": [{ "label": "mobile", "value": "+44 555 0100" }],
+              "addresses": [{
+                "label": "home", "street": "1 Byron Row", "city": "London",
+                "region": "LDN", "postalCode": "E1 1AA", "country": "UK"
+              }],
+              "notes": "Met at the salon.",
+              "birthday": "1815-12-10",
+              "photoRef": "abc123.jpg",
+              "groupIDs": ["g-1", "g-2"],
+              "pgpKey": "-----BEGIN PGP PUBLIC KEY BLOCK-----\\nxyz\\n-----END PGP PUBLIC KEY BLOCK-----",
+              "ims": [{ "service": "signal", "value": "+445550100" }],
+              "websites": [{ "label": "homepage", "value": "https://ada.example" }],
+              "relations": [{ "label": "spouse", "name": "William King" }],
+              "events": [{ "label": "anniversary", "date": "1835-07-08" }],
+              "phoneticGivenName": "AY-duh",
+              "phoneticFamilyName": "LUV-lace",
+              "department": "Research",
+              "customFields": [{ "label": "Callsign", "value": "Enchantress" }],
+              "pronouns": "she/her",
+              "mergedUIDs": ["ignored-1"],
+              "mergedInto": "ignored-2"
+            }
+          ]
+        }
+        """
+        let env = try makeEnvironment(client: stubClient(json: json))
+        try await env.repository.sync()
+
+        let contact = try #require(try await env.dao.getContact(uid: "srv-full"))
+        #expect(contact.name == "Ada Lovelace")
+        #expect(contact.givenName == "Ada")
+        #expect(contact.familyName == "Lovelace")
+        #expect(contact.middleName == "M.")
+        #expect(contact.prefix == "Dr.")
+        #expect(contact.suffix == "PhD")
+        #expect(contact.nickname == "Addie")
+        #expect(contact.org == "Analytical Engines Ltd")
+        #expect(contact.title == "Chief Mathematician")
+        #expect(contact.emails == [
+            ContactLabeledValue(label: "home", value: "ada@example.com"),
+            ContactLabeledValue(label: "work", value: "ada@engines.example"),
+        ])
+        #expect(contact.phones == [ContactLabeledValue(label: "mobile", value: "+44 555 0100")])
+        #expect(contact.addresses == [ContactPostalAddress(
+            label: "home", street: "1 Byron Row", city: "London",
+            region: "LDN", postalCode: "E1 1AA", country: "UK"
+        )])
+        #expect(contact.notes == "Met at the salon.")
+        #expect(contact.birthday == "1815-12-10")
+        #expect(contact.photoRef == "abc123.jpg")
+        #expect(contact.groupIDs == ["g-1", "g-2"])
+        #expect(contact.pgpKey?.contains("BEGIN PGP PUBLIC KEY BLOCK") == true)
+        #expect(contact.ims == [ContactIM(service: "signal", label: nil, value: "+445550100")])
+        #expect(contact.websites == [
+            ContactLabeledValue(label: "homepage", value: "https://ada.example")
+        ])
+        #expect(contact.relations == [ContactRelation(label: "spouse", name: "William King")])
+        #expect(contact.events == [ContactEvent(label: "anniversary", date: "1835-07-08")])
+        #expect(contact.phoneticGivenName == "AY-duh")
+        #expect(contact.phoneticFamilyName == "LUV-lace")
+        #expect(contact.department == "Research")
+        #expect(contact.customFields == [ContactCustomField(label: "Callsign", value: "Enchantress")])
+        #expect(contact.pronouns == "she/her")
+    }
+
+    @Test func pushBodyCarriesEveryPayloadField() async throws {
+        final class BodyCapture: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = ""
+            func set(_ body: String) { lock.lock(); value = body; lock.unlock() }
+            var body: String { lock.lock(); defer { lock.unlock() }; return value }
+        }
+        let capture = BodyCapture()
+        let env = try makeEnvironment(client: stubClient(json: #"{"cursor": 1}"#) { request in
+            capture.set(request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? "")
+        })
+
+        var contact = makeContact(name: "Ada Lovelace", email: "ada@example.com")
+        contact.givenName = "Ada"
+        contact.familyName = "Lovelace"
+        contact.middleName = "M."
+        contact.prefix = "Dr."
+        contact.suffix = "PhD"
+        contact.nickname = "Addie"
+        contact.org = "Analytical Engines Ltd"
+        contact.title = "Chief Mathematician"
+        contact.phones = [ContactLabeledValue(label: "mobile", value: "+44 555 0100")]
+        contact.addresses = [ContactPostalAddress(label: "home", street: "1 Byron Row")]
+        contact.notes = "Met at the salon."
+        contact.birthday = "1815-12-10"
+        contact.photoRef = "abc123.jpg"
+        contact.groupIDs = ["g-1"]
+        contact.pgpKey = "-----BEGIN PGP PUBLIC KEY BLOCK-----"
+        contact.ims = [ContactIM(service: "signal", label: nil, value: "+445550100")]
+        contact.websites = [ContactLabeledValue(label: "homepage", value: "https://ada.example")]
+        contact.relations = [ContactRelation(label: "spouse", name: "William King")]
+        contact.events = [ContactEvent(label: "anniversary", date: "1835-07-08")]
+        contact.phoneticGivenName = "AY-duh"
+        contact.phoneticFamilyName = "LUV-lace"
+        contact.department = "Research"
+        contact.customFields = [ContactCustomField(label: "Callsign", value: "Enchantress")]
+        contact.pronouns = "she/her"
+        try await env.repository.saveContact(contact)
+        try await env.repository.sync()
+
+        // The server replaces the whole contact on push, so every payload key
+        // must be on the wire or an edit here wipes web-entered data.
+        let body = capture.body
+        for fragment in [
+            #""fn":"Ada Lovelace""#,
+            #""givenName":"Ada""#,
+            #""familyName":"Lovelace""#,
+            #""middleName":"M.""#,
+            #""prefix":"Dr.""#,
+            #""suffix":"PhD""#,
+            #""nickname":"Addie""#,
+            #""org":"Analytical Engines Ltd""#,
+            #""title":"Chief Mathematician""#,
+            #""value":"ada@example.com""#,
+            #""label":"mobile""#,
+            #""street":"1 Byron Row""#,
+            #""notes":"Met at the salon.""#,
+            #""birthday":"1815-12-10""#,
+            #""photoRef":"abc123.jpg""#,
+            #""groupIDs":["g-1"]"#,
+            #""pgpKey":"-----BEGIN PGP PUBLIC KEY BLOCK-----""#,
+            #""service":"signal""#,
+            #""value":"https:\/\/ada.example""#,
+            #""name":"William King""#,
+            #""date":"1835-07-08""#,
+            #""phoneticGivenName":"AY-duh""#,
+            #""phoneticFamilyName":"LUV-lace""#,
+            #""department":"Research""#,
+            #""label":"Callsign""#,
+            #""pronouns":"she\/her""#,
+        ] {
+            #expect(body.contains(fragment), "push body missing \(fragment)")
+        }
+    }
+
+    @Test func v1StoreMigratesOnDiskAndBackfills() async throws {
+        let url = URL.temporaryDirectory
+            .appending(path: "migration-test-\(UUID().uuidString).store")
+        defer {
+            for suffix in ["", "-wal", "-shm"] {
+                try? FileManager.default.removeItem(
+                    at: URL(fileURLWithPath: url.path + suffix)
+                )
+            }
+        }
+
+        // Seed a store exactly as the shipped V1 schema wrote it.
+        do {
+            let v1Schema = Schema(versionedSchema: AppSchemaV1.self)
+            let container = try ModelContainer(
+                for: v1Schema,
+                configurations: [ModelConfiguration(schema: v1Schema, url: url)]
+            )
+            let context = ModelContext(container)
+            context.insert(AppSchemaV1.ContactEntity(
+                localId: UUID(), uid: "srv-1", rev: 1, name: "Ada",
+                email: "ada@example.com", phone: "555", avatarUrl: nil,
+                createdAt: Date(), updatedAt: Date(), needsSync: false
+            ))
+            try context.save()
+        }
+
+        // Reopen through the migration plan (what AppDatabase does at launch).
+        let container = try ModelContainer(
+            for: AppDatabase.schema,
+            migrationPlan: AppMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: AppDatabase.schema, url: url)]
+        )
+        let dao = ContactDAO(modelContainer: container)
+        try await dao.migrateLegacyFields()
+
+        let contact = try #require(try await dao.getContact(uid: "srv-1"))
+        #expect(contact.name == "Ada")
+        #expect(contact.emails == [ContactLabeledValue(label: nil, value: "ada@example.com")])
+        #expect(contact.phones == [ContactLabeledValue(label: nil, value: "555")])
+    }
+
+    @Test func migrateLegacyFieldsBackfillsOnceAndIsIdempotent() async throws {
+        let env = try makeEnvironment(client: stubClient())
+
+        // A V1-era row: legacy single-value columns set, arrays empty.
+        let context = ModelContext(env.database.container)
+        let legacy = ContactEntity(
+            localId: UUID(),
+            uid: "srv-legacy",
+            rev: 1,
+            name: "Grace",
+            createdAt: Date(),
+            updatedAt: Date(),
+            needsSync: false
+        )
+        legacy.legacyEmail = "grace@example.com"
+        legacy.legacyPhone = "555"
+        context.insert(legacy)
+        try context.save()
+
+        try await env.dao.migrateLegacyFields()
+        var contact = try #require(try await env.dao.getContact(uid: "srv-legacy"))
+        #expect(contact.emails == [ContactLabeledValue(label: nil, value: "grace@example.com")])
+        #expect(contact.phones == [ContactLabeledValue(label: nil, value: "555")])
+
+        // Second run must not duplicate the backfilled entries.
+        try await env.dao.migrateLegacyFields()
+        contact = try #require(try await env.dao.getContact(uid: "srv-legacy"))
+        #expect(contact.emails.count == 1)
+        #expect(contact.phones.count == 1)
+    }
+
+    // MARK: - Dedupe (Mobile_Contacts_DEDupe.md)
+
+    @Test func dedupeWithoutPairingThrows() async throws {
+        let env = try makeEnvironment(client: stubClient(), paired: false)
+        await #expect(throws: ContactSyncError.notPaired) {
+            try await env.repository.dedupe()
+        }
+    }
+
+    @Test func dedupeSendsEmptyJSONBodyToTheDedupeEndpoint() async throws {
+        let client = stubClient(json: #"{"mergedCount": 0, "groups": []}"#) { request in
+            #expect(request.httpMethod == "POST")
+            let url = request.url!.absoluteString
+            #expect(url.hasPrefix("https://relay.example.com/api/contacts/dedupe?"))
+            #expect(url.contains("sub=u1"))
+            #expect(url.contains("hash=h1"))
+            // The backend never reads the body, but does expect valid JSON.
+            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
+            #expect(body == "{}")
+        }
+        let env = try makeEnvironment(client: client)
+        let report = try await env.repository.dedupe()
+        #expect(report == ContactDedupeReport(mergedCount: 0, groups: []))
+    }
+
+    @Test func dedupeDecodesReportWithGroups() async throws {
+        let json = """
+        {
+          "mergedCount": 3,
+          "groups": [
+            { "survivor": "srv-1", "absorbed": ["srv-2", "srv-3"] },
+            { "survivor": "srv-8", "absorbed": ["srv-9"] }
+          ]
+        }
+        """
+        let env = try makeEnvironment(client: stubClient(json: json))
+        let report = try await env.repository.dedupe()
+        #expect(report.mergedCount == 3)
+        #expect(report.groups?.count == 2)
+        #expect(report.groups?.first == ContactDedupeGroup(
+            survivor: "srv-1",
+            absorbed: ["srv-2", "srv-3"]
+        ))
+    }
+
+    @Test func dedupeMapsRejectedCredentialsTo401() async throws {
+        let env = try makeEnvironment(client: stubClient(status: 401))
+        await #expect(throws: NetworkError.unauthorized) {
+            try await env.repository.dedupe()
+        }
+    }
+
+    @Test func dedupeThenSyncDropsAbsorbedAndKeepsSurvivorsUnionedEmails() async throws {
+        // Dedupe POST first, then the caller's follow-up sync (a GET pull,
+        // nothing queued): the merge only lands locally via the sync delta.
+        let dedupeJSON = #"""
+        {"mergedCount": 1, "groups": [{"survivor": "srv-1", "absorbed": ["srv-2"]}]}
+        """#
+        let syncJSON = """
+        {
+          "cursor": 12,
+          "changed": [
+            {
+              "uid": "srv-1",
+              "rev": 2,
+              "fn": "Ada Lovelace",
+              "emails": [
+                { "label": "work", "value": "ada@example.com" },
+                { "label": "home", "value": "ada@home.example.com" }
+              ]
+            }
+          ],
+          "deleted": [{ "uid": "srv-2", "deleted": true }]
+        }
+        """
+        let responses = ResponseQueue([dedupeJSON, syncJSON])
+        let env = try makeEnvironment(client: HTTPClient { request in
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
+            )!
+            return (Data(responses.next().utf8), response)
+        })
+        try await env.dao.upsert(contacts: [
+            makeContact(uid: "srv-1", name: "Ada Lovelace", email: "ada@example.com"),
+            makeContact(uid: "srv-2", name: "Ada Lovelace", email: "ada@home.example.com"),
+        ])
+
+        let report = try await env.repository.dedupe()
+        #expect(report.mergedCount == 1)
+        try await env.repository.sync()
+
+        let all = try await env.dao.listAll()
+        #expect(all.count == 1)
+        let survivor = try #require(all.first)
+        #expect(survivor.uid == "srv-1")
+        // Phase A regression: pre-array clients collapsed a merged contact to
+        // one email (the documented Mac data-loss gap). Both survive now.
+        #expect(survivor.emails == [
+            ContactLabeledValue(label: "work", value: "ada@example.com"),
+            ContactLabeledValue(label: "home", value: "ada@home.example.com"),
+        ])
+    }
+}
+
+/// Hands back queued response bodies in order, repeating the last one — for
+/// flows that issue several requests with different responses.
+private final class ResponseQueue: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bodies: [String]
+
+    init(_ bodies: [String]) {
+        self.bodies = bodies
+    }
+
+    func next() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return bodies.count > 1 ? bodies.removeFirst() : bodies[0]
     }
 }

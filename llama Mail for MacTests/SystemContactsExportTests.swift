@@ -65,17 +65,22 @@ private func makeContact(
     avatarUrl: String? = nil,
     updatedAt: Date = Date(timeIntervalSince1970: 1_000)
 ) -> Contact {
-    Contact(
+    var contact = Contact(
         localId: localId,
         uid: uid,
         name: name,
-        email: email,
-        phone: phone,
         avatarUrl: avatarUrl,
         createdAt: updatedAt,
         updatedAt: updatedAt,
         needsSync: false
     )
+    if !email.isEmpty {
+        contact.emails = [ContactLabeledValue(label: nil, value: email)]
+    }
+    if !phone.isEmpty {
+        contact.phones = [ContactLabeledValue(label: nil, value: phone)]
+    }
+    return contact
 }
 
 private func makeLink(
@@ -203,10 +208,169 @@ private func makeCard(
     }
 
     @Test func applyPreservesUnmappedFields() {
+        // note stays unmapped (restricted entitlement); a photo set by the
+        // user in Contacts.app survives when the app has no bytes to write.
         let cn = CNMutableContact()
-        cn.organizationName = "Analytical Engines Ltd"
+        cn.note = "met at the salon"
+        cn.imageData = Data([0xFF])
         SystemContactMapper.apply(makeContact(), to: cn)
+        #expect(cn.note == "met at the salon")
+        #expect(cn.imageData == Data([0xFF]))
+    }
+
+    @Test func mapsExtendedFieldsToCNProperties() {
+        var contact = makeContact(name: "Ada Lovelace", avatarUrl: "https://example.com/a.png")
+        contact.givenName = "Ada"
+        contact.familyName = "Lovelace"
+        contact.middleName = "M."
+        contact.prefix = "Dr."
+        contact.suffix = "PhD"
+        contact.nickname = "Addie"
+        contact.phoneticGivenName = "AY-duh"
+        contact.phoneticFamilyName = "LUV-lace"
+        contact.org = "Analytical Engines Ltd"
+        contact.title = "Chief Mathematician"
+        contact.department = "Research"
+        contact.emails = [
+            ContactLabeledValue(label: "home", value: "ada@example.com"),
+            ContactLabeledValue(label: "work", value: "ada@engines.example"),
+        ]
+        contact.phones = [ContactLabeledValue(label: "mobile", value: "+44 555 0100")]
+        contact.addresses = [ContactPostalAddress(
+            label: "home", street: "1 Byron Row", city: "London",
+            region: "LDN", postalCode: "E1 1AA", country: "UK"
+        )]
+        contact.birthday = "1815-12-10"
+        contact.events = [ContactEvent(label: "anniversary", date: "1835-07-08")]
+        contact.ims = [
+            ContactIM(service: "signal", label: nil, value: "+445550100"),
+            ContactIM(service: "linkedin", label: nil, value: "ada-lovelace"),
+            ContactIM(service: "x", label: nil, value: "@ada"),
+        ]
+        contact.websites = [ContactLabeledValue(label: "homepage", value: "https://ada.example")]
+        contact.relations = [ContactRelation(label: "spouse", name: "William King")]
+        // App-only fields must not leak into the card.
+        contact.pgpKey = "-----BEGIN PGP PUBLIC KEY BLOCK-----"
+        contact.pronouns = "she/her"
+        contact.customFields = [ContactCustomField(label: "Callsign", value: "Enchantress")]
+
+        let photoBytes = Data([0x01, 0x02])
+        let cn = SystemContactMapper.makeContact(from: contact, photoData: photoBytes)
+
+        #expect(cn.givenName == "Ada")
+        #expect(cn.familyName == "Lovelace")
+        #expect(cn.middleName == "M.")
+        #expect(cn.namePrefix == "Dr.")
+        #expect(cn.nameSuffix == "PhD")
+        #expect(cn.nickname == "Addie")
+        #expect(cn.phoneticGivenName == "AY-duh")
+        #expect(cn.phoneticFamilyName == "LUV-lace")
         #expect(cn.organizationName == "Analytical Engines Ltd")
+        #expect(cn.jobTitle == "Chief Mathematician")
+        #expect(cn.departmentName == "Research")
+        #expect(cn.emailAddresses.count == 2)
+        #expect(cn.emailAddresses[0].label == CNLabelHome)
+        #expect(cn.emailAddresses[1].label == CNLabelWork)
+        #expect(cn.phoneNumbers.first?.label == CNLabelPhoneNumberMobile)
+        #expect(cn.postalAddresses.first?.value.street == "1 Byron Row")
+        #expect(cn.postalAddresses.first?.value.state == "LDN")
+        #expect(cn.birthday == DateComponents(year: 1815, month: 12, day: 10))
+        #expect(cn.dates.first?.label == CNLabelDateAnniversary)
+        #expect(cn.dates.first?.value as? NSDateComponents
+            == DateComponents(year: 1835, month: 7, day: 8) as NSDateComponents)
+        // Messaging services land in IM addresses, social ones in profiles.
+        #expect(cn.instantMessageAddresses.count == 1)
+        #expect(cn.instantMessageAddresses.first?.value.service == "Signal")
+        #expect(cn.socialProfiles.count == 2)
+        #expect(cn.socialProfiles.first?.value.service == CNSocialProfileServiceLinkedIn)
+        #expect(cn.socialProfiles.last?.value.service == "X")
+        // Avatar entry keeps its slot ahead of real websites.
+        #expect(cn.urlAddresses.count == 2)
+        #expect(cn.urlAddresses[0].label == SystemContactMapper.avatarUrlLabel)
+        #expect(cn.urlAddresses[1].value as String == "https://ada.example")
+        #expect(cn.contactRelations.first?.label == CNLabelContactRelationSpouse)
+        #expect(cn.contactRelations.first?.value.name == "William King")
+        #expect(cn.imageData == photoBytes)
+        #expect(cn.note.isEmpty)
+    }
+
+    @Test func skipsUnparseableDatesInsteadOfCrashing() {
+        var contact = makeContact()
+        contact.birthday = "not-a-date"
+        contact.events = [ContactEvent(label: "anniversary", date: "1835-99-99")]
+        let cn = SystemContactMapper.makeContact(from: contact)
+        #expect(cn.birthday == nil)
+        #expect(cn.dates.isEmpty)
+    }
+
+    @Test func importReverseMapsExtendedFields() {
+        let card = CNMutableContact()
+        card.givenName = "Grace"
+        card.familyName = "Hopper"
+        card.middleName = "Brewster"
+        card.nickname = "Amazing Grace"
+        card.organizationName = "US Navy"
+        card.jobTitle = "Rear Admiral"
+        card.departmentName = "Computation"
+        card.emailAddresses = [
+            CNLabeledValue(label: CNLabelWork, value: "grace@navy.example" as NSString)
+        ]
+        card.phoneNumbers = [
+            CNLabeledValue(label: CNLabelPhoneNumberMobile, value: CNPhoneNumber(stringValue: "555"))
+        ]
+        let postal = CNMutablePostalAddress()
+        postal.street = "1 Pier Rd"
+        postal.state = "VA"
+        card.postalAddresses = [CNLabeledValue(label: CNLabelHome, value: postal)]
+        card.birthday = DateComponents(year: 1906, month: 12, day: 9)
+        card.dates = [CNLabeledValue(
+            label: CNLabelDateAnniversary,
+            value: DateComponents(year: 1944, month: 1, day: 1) as NSDateComponents
+        )]
+        card.urlAddresses = [
+            CNLabeledValue(label: SystemContactMapper.avatarUrlLabel, value: "https://x/a.png"),
+            CNLabeledValue(label: CNLabelHome, value: "https://grace.example" as NSString),
+        ]
+        card.instantMessageAddresses = [CNLabeledValue(
+            label: nil,
+            value: CNInstantMessageAddress(username: "grace.55", service: "Signal")
+        )]
+        card.socialProfiles = [CNLabeledValue(
+            label: nil,
+            value: CNSocialProfile(
+                urlString: nil, username: "grace", userIdentifier: nil,
+                service: CNSocialProfileServiceLinkedIn
+            )
+        )]
+        card.contactRelations = [CNLabeledValue(
+            label: CNLabelContactRelationSpouse,
+            value: CNContactRelation(name: "Vincent")
+        )]
+
+        let contact = SystemContactMapper.contact(from: card)
+        #expect(contact.name == "Grace Hopper")
+        #expect(contact.givenName == "Grace")
+        #expect(contact.middleName == "Brewster")
+        #expect(contact.nickname == "Amazing Grace")
+        #expect(contact.org == "US Navy")
+        #expect(contact.title == "Rear Admiral")
+        #expect(contact.department == "Computation")
+        #expect(contact.emails == [ContactLabeledValue(label: "work", value: "grace@navy.example")])
+        #expect(contact.phones == [ContactLabeledValue(label: "mobile", value: "555")])
+        #expect(contact.addresses.first?.street == "1 Pier Rd")
+        #expect(contact.addresses.first?.region == "VA")
+        #expect(contact.birthday == "1906-12-09")
+        #expect(contact.events == [ContactEvent(label: "anniversary", date: "1944-01-01")])
+        // The avatar entry is app metadata, not a website.
+        #expect(contact.websites == [
+            ContactLabeledValue(label: "home", value: "https://grace.example")
+        ])
+        #expect(contact.ims == [
+            ContactIM(service: "signal", label: nil, value: "grace.55"),
+            ContactIM(service: "linkedin", label: nil, value: "grace"),
+        ])
+        #expect(contact.relations == [ContactRelation(label: "spouse", name: "Vincent")])
+        #expect(contact.needsSync == true)
     }
 
     @Test func matchKeyPrefersCaseInsensitiveEmail() {
@@ -596,7 +760,7 @@ private func makeCard(
         let contacts = try await env.dao.listAll()
         #expect(contacts.count == 1)
         #expect(contacts.first?.name == "Grace Hopper")
-        #expect(contacts.first?.email == "grace@example.com")
+        #expect(contacts.first?.primaryEmail == "grace@example.com")
         #expect(contacts.first?.needsSync == true)
         #expect(env.linkStore.all().first?.imported == true)
 

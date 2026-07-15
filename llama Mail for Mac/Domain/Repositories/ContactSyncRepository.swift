@@ -30,6 +30,8 @@ final class ContactSyncRepository {
     /// Mirrors changes into the system Contacts database when enabled; nil in
     /// tests that don't exercise the export.
     private let systemContactsExporter: SystemContactsExporter?
+    /// Photo bytes for synced photoRefs; nil in tests that don't exercise it.
+    private let photoCache: ContactPhotoCache?
 
     init(
         client: ContactSyncClient,
@@ -37,7 +39,8 @@ final class ContactSyncRepository {
         cursorStore: ContactCursorStore,
         pendingDeletesStore: ContactPendingDeletesStore,
         securePairingStore: SecurePairingStore,
-        systemContactsExporter: SystemContactsExporter? = nil
+        systemContactsExporter: SystemContactsExporter? = nil,
+        photoCache: ContactPhotoCache? = nil
     ) {
         self.client = client
         self.contactDAO = contactDAO
@@ -45,6 +48,7 @@ final class ContactSyncRepository {
         self.pendingDeletesStore = pendingDeletesStore
         self.securePairingStore = securePairingStore
         self.systemContactsExporter = systemContactsExporter
+        self.photoCache = photoCache
     }
 
     // MARK: - Local CRUD
@@ -163,6 +167,10 @@ final class ContactSyncRepository {
         pendingDeletesStore.clear()
         cursorStore.advance(to: response.cursor)
 
+        // Photos before the system-contacts export so freshly-arrived bytes
+        // make it onto the cards in the same pass.
+        await fetchMissingPhotos(serverUrl: pairing.srv, auth: auth)
+
         // tooOld returns early above on purpose: links survive the wipe and
         // this reconcile re-links re-pulled contacts by uid instead of
         // deleting and recreating their system cards.
@@ -175,37 +183,181 @@ final class ContactSyncRepository {
         )
     }
 
+    // MARK: - Dedupe
+
+    /// Asks the server to merge duplicate contacts (Mobile_Contacts_DEDupe.md).
+    /// Single-purpose on purpose: the merges arrive through the normal sync
+    /// delta, so the caller runs `sync()` afterwards to pick them up.
+    func dedupe() async throws -> ContactDedupeReport {
+        guard let pairing = try securePairingStore.loadPairing() else {
+            throw ContactSyncError.notPaired
+        }
+        return try await client.dedupe(
+            serverUrl: pairing.srv,
+            auth: RelayAuth(pairing: pairing)
+        )
+    }
+
     // MARK: - Private
 
+    /// Best-effort byte fetch for photoRefs the cache doesn't have yet. A 401
+    /// means the backend hasn't shipped pairing auth for the photo endpoint
+    /// (llama-labels Part 0 gap) — stop for this pass instead of 401-ing once
+    /// per contact; any other failure skips just that contact.
+    private func fetchMissingPhotos(serverUrl: String, auth: RelayAuth) async {
+        guard let photoCache else { return }
+        let contacts = (try? await contactDAO.listAll()) ?? []
+        for contact in contacts {
+            guard let uid = contact.uid,
+                  let photoRef = contact.photoRef,
+                  !photoRef.isEmpty,
+                  !photoCache.hasData(for: photoRef)
+            else { continue }
+            do {
+                let data = try await client.fetchPhoto(
+                    serverUrl: serverUrl,
+                    auth: auth,
+                    uid: uid
+                )
+                photoCache.store(data, for: photoRef)
+            } catch NetworkError.unauthorized {
+                return
+            } catch {
+                continue
+            }
+        }
+    }
+
     /// Creates push with uid "" (Android contract); edits carry uid + rev.
+    /// Sends the complete payload — the server replaces the whole contact on
+    /// upsert, so an omitted field would be wiped server-side. Arrays are
+    /// always present (an emptied list must clear); empty scalars go as nil,
+    /// which the server decodes as its zero value.
     private static func toWireDTO(_ contact: Contact) -> ContactDTO {
         ContactDTO(
             uid: contact.uid ?? "",
             rev: contact.uid == nil ? 0 : contact.rev,
             deleted: nil,
             fn: contact.name,
-            emails: contact.email.isEmpty
-                ? [] : [ContactFieldDTO(label: nil, value: contact.email)],
-            phones: contact.phone.isEmpty
-                ? [] : [ContactFieldDTO(label: nil, value: contact.phone)]
+            givenName: contact.givenName.nilIfEmpty,
+            familyName: contact.familyName.nilIfEmpty,
+            middleName: contact.middleName.nilIfEmpty,
+            prefix: contact.prefix.nilIfEmpty,
+            suffix: contact.suffix.nilIfEmpty,
+            nickname: contact.nickname.nilIfEmpty,
+            org: contact.org.nilIfEmpty,
+            title: contact.title.nilIfEmpty,
+            emails: contact.emails.map { ContactFieldDTO(label: $0.label, value: $0.value) },
+            phones: contact.phones.map { ContactFieldDTO(label: $0.label, value: $0.value) },
+            addresses: contact.addresses.map {
+                ContactAddressDTO(
+                    label: $0.label,
+                    street: $0.street,
+                    city: $0.city,
+                    region: $0.region,
+                    postalCode: $0.postalCode,
+                    country: $0.country
+                )
+            },
+            notes: contact.notes.nilIfEmpty,
+            birthday: contact.birthday.nilIfEmpty,
+            photoRef: contact.photoRef,
+            groupIDs: contact.groupIDs,
+            pgpKey: contact.pgpKey,
+            ims: contact.ims.map {
+                ContactIMDTO(service: $0.service, label: $0.label, value: $0.value)
+            },
+            websites: contact.websites.map {
+                ContactFieldDTO(label: $0.label, value: $0.value)
+            },
+            relations: contact.relations.map {
+                ContactRelationDTO(label: $0.label, name: $0.name)
+            },
+            events: contact.events.map {
+                ContactEventDTO(label: $0.label, date: $0.date)
+            },
+            phoneticGivenName: contact.phoneticGivenName.nilIfEmpty,
+            phoneticFamilyName: contact.phoneticFamilyName.nilIfEmpty,
+            department: contact.department.nilIfEmpty,
+            customFields: contact.customFields.map {
+                ContactCustomFieldDTO(label: $0.label, value: $0.value)
+            },
+            pronouns: contact.pronouns.nilIfEmpty
         )
     }
 
+    /// Server `changed` entries carry the complete contact, so a missing
+    /// field means empty — mapping falls back to `?? []` / `?? ""`, never to
+    /// the existing value (that would resurrect fields cleared elsewhere).
+    /// Only fields the server never sends (avatarUrl, local bookkeeping)
+    /// keep their existing values.
     private func applyServerContact(uid: String, dto: ContactDTO) async throws {
         let now = Date()
         let existing = try await contactDAO.getContact(uid: uid)
-        let contact = Contact(
+        var contact = Contact(
             localId: existing?.localId ?? UUID(),
             uid: uid,
             rev: dto.rev ?? existing?.rev ?? 0,
-            name: dto.fn ?? existing?.name ?? "",
-            email: dto.emails?.first?.value ?? existing?.email ?? "",
-            phone: dto.phones?.first?.value ?? existing?.phone ?? "",
+            name: dto.fn ?? "",
             avatarUrl: existing?.avatarUrl,
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
             needsSync: false
         )
+        contact.givenName = dto.givenName ?? ""
+        contact.familyName = dto.familyName ?? ""
+        contact.middleName = dto.middleName ?? ""
+        contact.prefix = dto.prefix ?? ""
+        contact.suffix = dto.suffix ?? ""
+        contact.nickname = dto.nickname ?? ""
+        contact.org = dto.org ?? ""
+        contact.title = dto.title ?? ""
+        contact.emails = (dto.emails ?? []).map {
+            ContactLabeledValue(label: $0.label, value: $0.value)
+        }
+        contact.phones = (dto.phones ?? []).map {
+            ContactLabeledValue(label: $0.label, value: $0.value)
+        }
+        contact.addresses = (dto.addresses ?? []).map {
+            ContactPostalAddress(
+                label: $0.label,
+                street: $0.street,
+                city: $0.city,
+                region: $0.region,
+                postalCode: $0.postalCode,
+                country: $0.country
+            )
+        }
+        contact.notes = dto.notes ?? ""
+        contact.birthday = dto.birthday ?? ""
+        contact.photoRef = dto.photoRef
+        contact.groupIDs = dto.groupIDs ?? []
+        contact.pgpKey = dto.pgpKey
+        contact.ims = (dto.ims ?? []).map {
+            ContactIM(service: $0.service, label: $0.label, value: $0.value)
+        }
+        contact.websites = (dto.websites ?? []).map {
+            ContactLabeledValue(label: $0.label, value: $0.value)
+        }
+        contact.relations = (dto.relations ?? []).map {
+            ContactRelation(label: $0.label, name: $0.name)
+        }
+        contact.events = (dto.events ?? []).map {
+            ContactEvent(label: $0.label, date: $0.date)
+        }
+        contact.phoneticGivenName = dto.phoneticGivenName ?? ""
+        contact.phoneticFamilyName = dto.phoneticFamilyName ?? ""
+        contact.department = dto.department ?? ""
+        contact.customFields = (dto.customFields ?? []).map {
+            ContactCustomField(label: $0.label, value: $0.value)
+        }
+        contact.pronouns = dto.pronouns ?? ""
         try await contactDAO.upsert(contacts: [contact])
     }
+}
+
+private extension String {
+    /// Empty scalars push as nil: the server's omitempty treats "" and
+    /// absent identically, and nil keeps payloads small.
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
