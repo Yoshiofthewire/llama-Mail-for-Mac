@@ -335,18 +335,7 @@ struct MacRootView: View {
             // in memory is stale until it reloads.
             if !isPresented { Task { await contactsViewModel.load() } }
         }
-        .overlay(alignment: .bottom) {
-            if let message = contactsViewModel.statusMessage {
-                Text(message)
-                    .font(AppFont.ui(13))
-                    .foregroundStyle(theme.inkStrong)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(theme.panel, in: Capsule())
-                    .overlay(Capsule().strokeBorder(theme.line, lineWidth: 1))
-                    .padding(.bottom, 10)
-            }
-        }
+        .toast(message: contactsViewModel.statusMessage)
     }
 
     // MARK: - Detail pane
