@@ -34,6 +34,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				Presentation/AGENTS.md,
 			);
 			target = 927A36E1300148DB0090B7AF /* llama Mail for Mac */;
 		};
