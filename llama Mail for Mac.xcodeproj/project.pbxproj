@@ -24,7 +24,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		927A36E2300148DB0090B7AF /* llama Mail for Mac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "llama Mail for Mac.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		927A36E2300148DB0090B7AF /* llama Mail.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "llama Mail.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		927A36F3300148DC0090B7AF /* llama Mail for MacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "llama Mail for MacTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		927A36FD300148DC0090B7AF /* llama Mail for MacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "llama Mail for MacUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -98,7 +98,7 @@
 		927A36E3300148DB0090B7AF /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				927A36E2300148DB0090B7AF /* llama Mail for Mac.app */,
+				927A36E2300148DB0090B7AF /* llama Mail.app */,
 				927A36F3300148DC0090B7AF /* llama Mail for MacTests.xctest */,
 				927A36FD300148DC0090B7AF /* llama Mail for MacUITests.xctest */,
 			);
@@ -127,7 +127,7 @@
 			packageProductDependencies = (
 			);
 			productName = "llama Mail for Mac";
-			productReference = 927A36E2300148DB0090B7AF /* llama Mail for Mac.app */;
+			productReference = 927A36E2300148DB0090B7AF /* llama Mail.app */;
 			productType = "com.apple.product-type.application";
 		};
 		927A36F2300148DC0090B7AF /* llama Mail for MacTests */ = {
