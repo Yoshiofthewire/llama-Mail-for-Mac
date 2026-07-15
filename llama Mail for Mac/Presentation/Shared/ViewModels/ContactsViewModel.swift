@@ -14,6 +14,10 @@ final class ContactsViewModel {
     private let repository: ContactSyncRepository
 
     private(set) var contacts: [Contact] = []
+    /// Compose's autocomplete and the address book search this instead of the
+    /// store; see ContactSearch. Rebuilt in `load()` — the one place
+    /// `contacts` changes — so the two can't drift.
+    private(set) var searchIndex = ContactSearchIndex()
     private(set) var isSyncing = false
     private(set) var statusMessage: String?
 
@@ -23,6 +27,15 @@ final class ContactsViewModel {
 
     func load() async {
         contacts = (try? await repository.contacts()) ?? []
+        searchIndex = ContactSearchIndex(contacts: contacts)
+    }
+
+    /// For callers that need contacts but aren't the contact list. On iOS
+    /// nothing loads them until the Contacts tab is opened, so compose would
+    /// otherwise autocomplete against an empty book on a fresh launch.
+    func loadIfNeeded() async {
+        guard contacts.isEmpty else { return }
+        await load()
     }
 
     func sync() async {

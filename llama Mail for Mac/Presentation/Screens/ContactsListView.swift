@@ -110,17 +110,6 @@ struct ContactsListView: View {
             if !isPresented { Task { await viewModel.load() } }
         }
         .task { await viewModel.load() }
-        .overlay(alignment: .bottom) {
-            if let message = viewModel.statusMessage {
-                Text(message)
-                    .font(AppFont.ui(13))
-                    .foregroundStyle(theme.inkStrong)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(theme.panel, in: Capsule())
-                    .overlay(Capsule().strokeBorder(theme.line, lineWidth: 1))
-                    .padding(.bottom, 10)
-            }
-        }
+        .toast(message: viewModel.statusMessage)
     }
 }
