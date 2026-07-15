@@ -215,6 +215,11 @@ enum SystemContactMapper {
                 name: $0.value.name
             )
         }
+        if contact.name.isEmpty {
+            // Contacts.app allows cards without a personal name (company-only
+            // cards), but the server rejects creates without an fn.
+            contact.name = contact.derivedDisplayName
+        }
         return contact
     }
 

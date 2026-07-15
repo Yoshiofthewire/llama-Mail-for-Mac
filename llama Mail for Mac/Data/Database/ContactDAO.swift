@@ -65,12 +65,52 @@ actor ContactDAO {
         return try modelContext.fetch(descriptor).map(\.toDomain)
     }
 
-    /// Reconciliation result: attach the server-assigned uid to a local contact.
+    /// Reconciliation result: attach the server-assigned uid to a local
+    /// contact. Refuses a uid another row already holds — two rows sharing a
+    /// uid is how mis-reconciled creates turn into local duplicates.
     func assignUid(localId: UUID, uid: String) throws {
-        guard let entity = try fetchEntity(localId: localId) else { return }
+        guard try fetchEntity(uid: uid) == nil,
+              let entity = try fetchEntity(localId: localId) else { return }
         entity.uid = uid
         entity.needsSync = false
         try modelContext.save()
+    }
+
+    /// One-time cleanup of rows damaged by the old order-based reconciler
+    /// (the local-only duplication bug; the server copy is authoritative and
+    /// was never affected).
+    /// - Rows sharing a uid: keep the oldest, drop the rest — the next sync
+    ///   delta refreshes the survivor's fields from the server.
+    /// - Nameless uid-less rows (imports the server silently dropped): give
+    ///   them a derived name and re-queue them; unnameable ones stay local.
+    func repairReconciliationArtifacts() throws {
+        let entities = try modelContext.fetch(FetchDescriptor<ContactEntity>())
+        var changed = false
+
+        var keptByUid: [String: ContactEntity] = [:]
+        for entity in entities.sorted(by: { $0.createdAt < $1.createdAt }) {
+            guard let uid = entity.uid, !uid.isEmpty else { continue }
+            if keptByUid[uid] == nil {
+                keptByUid[uid] = entity
+            } else {
+                modelContext.delete(entity)
+                changed = true
+            }
+        }
+
+        for entity in entities
+        where entity.uid == nil
+            && entity.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let fallback = entity.toDomain.derivedDisplayName
+            guard !fallback.isEmpty else { continue }
+            entity.name = fallback
+            entity.needsSync = true
+            changed = true
+        }
+
+        if changed {
+            try modelContext.save()
+        }
     }
 
     func clearNeedsSync(localIds: [UUID]) throws {

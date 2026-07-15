@@ -88,22 +88,44 @@ private func makeDTO(
         #expect(assignments.first { $0.localId == local[1].localId }?.uid == "srv-g")
     }
 
-    @Test func fallsBackToOrderForUnmatchedContent() {
-        // Server normalized the names, so content matching fails.
+    @Test func unmatchedContentIsNeverPairedByOrder() {
+        // A push response carries every change since baseCursor, including
+        // other devices' edits. The old positional fallback paired those with
+        // leftover local creates, stamping a foreign uid onto them — the
+        // iOS/macOS local-duplication bug. Unmatched creates stay pending.
         let local = [
-            makeContact(name: "ada lovelace", email: "ada@example.com"),
-            makeContact(name: "grace hopper", email: "grace@example.com"),
+            makeContact(name: "", email: ""), // fn-less import the server dropped
+            makeContact(name: "ada lovelace", email: "ada@example.com"), // name differs
         ]
         let response = [
-            makeDTO(uid: "srv-1", fn: "Ada Lovelace", email: "ada@example.com"),
-            makeDTO(uid: "srv-2", fn: "Grace Hopper", email: "grace@example.com"),
+            makeDTO(uid: "srv-1", fn: "Zoe Kim", email: "zoe@example.com"),
+            makeDTO(uid: "srv-2", fn: "Ada Lovelace", email: "ada@example.com"),
         ]
         let assignments = ContactSyncReconciliation.reconcile(
             localPending: local,
             responseChanged: response
         )
-        #expect(assignments.map(\.uid) == ["srv-1", "srv-2"])
-        #expect(assignments.map(\.localId) == local.map(\.localId))
+        #expect(assignments.isEmpty)
+    }
+
+    @Test func matchesFullContentNotJustNameAndFirstEmail() {
+        var local = makeContact(name: "Ada", email: "ada@example.com")
+        local.org = "Analytical Engines Ltd"
+        local.phones = [ContactLabeledValue(label: nil, value: "555")]
+
+        var wrongOrg = makeDTO(uid: "srv-wrong", fn: "Ada", email: "ada@example.com")
+        wrongOrg.phones = [ContactFieldDTO(label: nil, value: "555")]
+        var exact = makeDTO(uid: "srv-right", fn: "Ada", email: "ada@example.com")
+        exact.org = "Analytical Engines Ltd"
+        exact.phones = [ContactFieldDTO(label: nil, value: "555")]
+
+        let assignments = ContactSyncReconciliation.reconcile(
+            localPending: [local],
+            responseChanged: [wrongOrg, exact]
+        )
+        #expect(assignments == [
+            ContactSyncReconciliation.Assignment(localId: local.localId, uid: "srv-right")
+        ])
     }
 
     @Test func ignoresDeletedAndUidlessCandidatesAndLeavesExtrasPending() {
@@ -225,7 +247,17 @@ private func makeDTO(
             var methods: [String] { lock.lock(); defer { lock.unlock() }; return value }
         }
         let log = MethodLog()
-        let env = try makeEnvironment(client: stubClient(json: #"{"cursor": 1}"#) { request in
+        // The echo lets the first sync reconcile the create; a response
+        // without it would leave the create pending (retried by design).
+        let json = """
+        {
+          "cursor": 1,
+          "changed": [
+            { "uid": "srv-ada", "rev": 1, "fn": "Ada", "emails": [{ "value": "ada@example.com" }] }
+          ]
+        }
+        """
+        let env = try makeEnvironment(client: stubClient(json: json) { request in
             log.append(request.httpMethod ?? "")
         })
         try await env.repository.saveContact(makeContact(name: "Ada", email: "ada@example.com"))
@@ -282,6 +314,108 @@ private func makeDTO(
         #expect(all.first?.needsSync == false)
         #expect(try await env.dao.listPendingSync().isEmpty)
         #expect(env.cursorStore.lastCursor == 456)
+    }
+
+    @Test func createWithConcurrentServerChangesGetsItsOwnUid() async throws {
+        // Another device's edit rides along in the push response (it changed
+        // after our baseCursor). The old order-based fallback stamped its uid
+        // onto the local create, duplicating the contact locally.
+        let json = """
+        {
+          "cursor": 20,
+          "changed": [
+            { "uid": "srv-zoe", "rev": 9, "fn": "Zoe", "emails": [{ "value": "zoe@example.com" }] },
+            { "uid": "srv-ada", "rev": 1, "fn": "Ada", "emails": [{ "value": "ada@example.com" }] }
+          ]
+        }
+        """
+        let env = try makeEnvironment(client: stubClient(json: json))
+        try await env.repository.saveContact(makeContact(name: "Ada", email: "ada@example.com"))
+
+        try await env.repository.sync()
+        let all = try await env.dao.listAll()
+        #expect(all.count == 2)
+        #expect(all.first { $0.name == "Ada" }?.uid == "srv-ada")
+        #expect(all.first { $0.name == "Zoe" }?.uid == "srv-zoe")
+    }
+
+    @Test func namelessContactIsNeverPushed() async throws {
+        // The server silently drops creates without an fn, so pushing one
+        // strands it (no echo to reconcile). It stays local and pending
+        // until it gets a name; with nothing else queued the sync is a pull.
+        let json = #"{"cursor": 4, "changed": [{"uid": "srv-x", "rev": 1, "fn": "Someone Else"}]}"#
+        let env = try makeEnvironment(client: stubClient(json: json) { request in
+            #expect(request.httpMethod == "GET")
+        })
+        try await env.repository.saveContact(makeContact(name: "", email: "acme@corp.example"))
+
+        try await env.repository.sync()
+        let all = try await env.dao.listAll()
+        #expect(all.count == 2)
+        let stranded = try #require(all.first { $0.uid == nil })
+        #expect(stranded.needsSync == true)
+        #expect(all.contains { $0.uid == "srv-x" })
+    }
+
+    @Test func unmatchedCreateStaysPendingForRetry() async throws {
+        // No echo in the response: the create keeps needsSync so a later
+        // sync can still reconcile it, instead of being stranded uid-less.
+        let env = try makeEnvironment(client: stubClient(json: #"{"cursor": 5}"#))
+        try await env.repository.saveContact(makeContact(name: "Ada", email: "ada@example.com"))
+
+        try await env.repository.sync()
+        let pending = try await env.dao.listPendingSync()
+        #expect(pending.count == 1)
+        #expect(pending.first?.uid == nil)
+    }
+
+    @Test func assignUidRefusesUidAlreadyOnAnotherRow() async throws {
+        let env = try makeEnvironment(client: stubClient())
+        let existing = makeContact(uid: "srv-1", name: "Ada")
+        let create = makeContact(name: "Junk", needsSync: true)
+        try await env.dao.upsert(contacts: [existing, create])
+
+        try await env.dao.assignUid(localId: create.localId, uid: "srv-1")
+        let rows = try await env.dao.listAll()
+        #expect(rows.filter { $0.uid == "srv-1" }.count == 1)
+        // The refused create stays pending instead of shadowing srv-1.
+        #expect(try await env.dao.listPendingSync().count == 1)
+    }
+
+    @Test func repairDropsDuplicateUidRowsAndRevivesNamelessImports() async throws {
+        let env = try makeEnvironment(client: stubClient())
+        let context = ModelContext(env.database.container)
+        // Two rows stamped with the same uid by the old order-based reconciler.
+        let original = ContactEntity(
+            localId: UUID(), uid: "srv-1", name: "Ada",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(), needsSync: false
+        )
+        let duplicate = ContactEntity(
+            localId: UUID(), uid: "srv-1", name: "Ada",
+            createdAt: Date(timeIntervalSince1970: 2_000),
+            updatedAt: Date(), needsSync: false
+        )
+        // A company-card import the server silently dropped, then stranded.
+        let stranded = ContactEntity(
+            localId: UUID(), uid: nil, name: "",
+            createdAt: Date(), updatedAt: Date(), needsSync: false
+        )
+        stranded.org = "Acme Corp"
+        context.insert(original)
+        context.insert(duplicate)
+        context.insert(stranded)
+        try context.save()
+        let originalLocalId = original.localId
+
+        try await env.dao.repairReconciliationArtifacts()
+
+        let rows = try await env.dao.listAll()
+        #expect(rows.filter { $0.uid == "srv-1" }.count == 1)
+        #expect(rows.first { $0.uid == "srv-1" }?.localId == originalLocalId)
+        let revived = try #require(rows.first { $0.uid == nil })
+        #expect(revived.name == "Acme Corp")
+        #expect(revived.needsSync == true)
     }
 
     @Test func serverDeleteRemovesLocalContactViaPull() async throws {

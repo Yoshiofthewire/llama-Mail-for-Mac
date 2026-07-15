@@ -116,4 +116,16 @@ struct Contact: Identifiable, Hashable, Sendable {
     /// Compatibility shims for single-value call sites (list rows, match keys).
     var primaryEmail: String { emails.first?.value ?? "" }
     var primaryPhone: String { phones.first?.value ?? "" }
+
+    /// Display-name fallback for contacts without one (company-only cards
+    /// imported from Contacts.app): org, then the primary email's local part,
+    /// then the primary phone. The server rejects creates without an fn, so a
+    /// nameless contact can never sync. Empty when there's nothing to derive.
+    var derivedDisplayName: String {
+        if !org.isEmpty { return org }
+        if let localPart = emails.first?.value.split(separator: "@").first {
+            return String(localPart)
+        }
+        return primaryPhone
+    }
 }

@@ -133,17 +133,28 @@ final class SingletonGraph {
     // MARK: - Startup migrations
 
     private static let legacyContactFieldsMigratedKey = "contacts.legacyFieldsMigrated"
+    private static let reconciliationRepairKey = "contacts.reconciliationRepair.v1"
     private let userDefaults: UserDefaults
 
-    /// One-time data backfills after schema migrations (currently the
-    /// V1→V2 legacy email/phone → arrays copy). Safe to call every launch.
+    /// One-time data backfills after schema migrations (the V1→V2 legacy
+    /// email/phone → arrays copy, and the cleanup of rows duplicated by the
+    /// old order-based reconciler). Safe to call every launch.
     func runStartupMigrationsIfNeeded() async {
-        guard !userDefaults.bool(forKey: Self.legacyContactFieldsMigratedKey) else { return }
-        do {
-            try await contactDAO.migrateLegacyFields()
-            userDefaults.set(true, forKey: Self.legacyContactFieldsMigratedKey)
-        } catch {
-            Log.sync.error("Contact legacy-field backfill failed: \(error.localizedDescription)")
+        if !userDefaults.bool(forKey: Self.legacyContactFieldsMigratedKey) {
+            do {
+                try await contactDAO.migrateLegacyFields()
+                userDefaults.set(true, forKey: Self.legacyContactFieldsMigratedKey)
+            } catch {
+                Log.sync.error("Contact legacy-field backfill failed: \(error.localizedDescription)")
+            }
+        }
+        if !userDefaults.bool(forKey: Self.reconciliationRepairKey) {
+            do {
+                try await contactDAO.repairReconciliationArtifacts()
+                userDefaults.set(true, forKey: Self.reconciliationRepairKey)
+            } catch {
+                Log.sync.error("Contact reconciliation repair failed: \(error.localizedDescription)")
+            }
         }
     }
 

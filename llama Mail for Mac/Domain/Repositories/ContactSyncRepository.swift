@@ -110,8 +110,15 @@ final class ContactSyncRepository {
         let cursor = cursorStore.lastCursor
 
         let pending = try await contactDAO.listPendingSync()
+        // The server silently drops any non-delete change with an empty fn
+        // (llama-labels contacts_handlers.go), so a nameless contact is never
+        // echoed back and can never reconcile — pushing it just strands it.
+        // Keep it local and pending until it has a name.
+        let pushable = pending.filter {
+            !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         let tombstones = pendingDeletesStore.all()
-        let changes = pending.map(Self.toWireDTO)
+        let changes = pushable.map(Self.toWireDTO)
             + tombstones.map { ContactDTO(uid: $0, rev: 0, deleted: true) }
 
         // Pull when nothing is queued, push otherwise (Android sync()).
@@ -143,7 +150,7 @@ final class ContactSyncRepository {
         // Reconcile before applying so the server's copy of a local create
         // updates the existing row (matched by its new uid) instead of
         // inserting a duplicate.
-        let creates = pending.filter { $0.uid == nil }
+        let creates = pushable.filter { $0.uid == nil }
         for assignment in ContactSyncReconciliation.reconcile(
             localPending: creates,
             responseChanged: changed
@@ -163,7 +170,12 @@ final class ContactSyncRepository {
             applied += 1
         }
 
-        try await contactDAO.clearNeedsSync(localIds: pending.map(\.localId))
+        // Edits are confirmed by the push itself; creates are confirmed only
+        // by reconciliation (assignUid clears their flag), so an unmatched
+        // create keeps needsSync and retries on the next sync.
+        try await contactDAO.clearNeedsSync(
+            localIds: pushable.filter { $0.uid != nil }.map(\.localId)
+        )
         pendingDeletesStore.clear()
         cursorStore.advance(to: response.cursor)
 

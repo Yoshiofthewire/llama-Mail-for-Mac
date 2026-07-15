@@ -373,6 +373,28 @@ private func makeCard(
         #expect(contact.needsSync == true)
     }
 
+    @Test func companyOnlyCardImportsWithOrgAsName() {
+        // Contacts.app allows cards without a personal name; the server
+        // silently drops creates without an fn, so the import derives one.
+        let card = CNMutableContact()
+        card.organizationName = "Acme Corp"
+        card.emailAddresses = [
+            CNLabeledValue(label: CNLabelWork, value: "info@acme.example" as NSString)
+        ]
+        let contact = SystemContactMapper.contact(from: card)
+        #expect(contact.name == "Acme Corp")
+        #expect(contact.org == "Acme Corp")
+    }
+
+    @Test func namelessCardFallsBackToEmailLocalPartName() {
+        let card = CNMutableContact()
+        card.emailAddresses = [
+            CNLabeledValue(label: CNLabelHome, value: "grace@example.com" as NSString)
+        ]
+        let contact = SystemContactMapper.contact(from: card)
+        #expect(contact.name == "grace")
+    }
+
     @Test func matchKeyPrefersCaseInsensitiveEmail() {
         let a = SystemContactMapper.matchKey(name: "Ada", email: " Ada@Example.com ", phone: "")
         let b = SystemContactMapper.matchKey(name: "Someone Else", email: "ada@example.com", phone: "123")
