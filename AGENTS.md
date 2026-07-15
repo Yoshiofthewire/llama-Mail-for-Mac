@@ -75,6 +75,27 @@ Default section order:
 5. Run existing verification when relevant
 6. Report any docs intentionally left unchanged and why
 
+## Testing
+
+- Run: `xcodebuild test -scheme "llama Mail for Mac" -destination 'platform=macOS'`.
+- `llama Mail for Mac.xctestplan` is the shared test plan, referenced from the
+  shared scheme. Both test targets set `parallelizable: false`, and that must
+  stay off.
+
+  Swift Testing parallelizes test functions in-process by default. With it on,
+  roughly one full-suite run in six aborts with SIGABRT: an uncaught
+  Objective-C exception is thrown inside SwiftData/CoreData's
+  `performBlockAndWait` and rethrown across the block boundary, killing the
+  process. Whichever tests are in flight are then reported as failures, so the
+  names change every run and are unrelated to the real fault — pure JSON and
+  theme tests "fail" in 0.000s because they never ran. No single test is the
+  trigger (skipping the prime suspect does not help), and the app itself is
+  unaffected: it opens exactly one ModelContainer, where the suite opens dozens
+  concurrently.
+
+  Note `parallelizable` belongs on each entry in `testTargets`, not in
+  `defaultOptions`, where it is silently ignored.
+
 ## User Preferences
 
 When the user requests a durable behavior change, record it here or in the relevant child AGENTS.md
