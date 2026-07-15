@@ -1,0 +1,33 @@
+{
+  "configurations" : [
+    {
+      "id" : "A1B2C3D4-0000-4000-A000-000000000001",
+      "name" : "Configuration 1",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "testTimeoutsEnabled" : true
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:llama Mail for Mac.xcodeproj",
+        "identifier" : "927A36F2300148DC0090B7AF",
+        "name" : "llama Mail for MacTests"
+      }
+    },
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:llama Mail for Mac.xcodeproj",
+        "identifier" : "927A36FC300148DC0090B7AF",
+        "name" : "llama Mail for MacUITests"
+      }
+    }
+  ],
+  "version" : 1
+}
