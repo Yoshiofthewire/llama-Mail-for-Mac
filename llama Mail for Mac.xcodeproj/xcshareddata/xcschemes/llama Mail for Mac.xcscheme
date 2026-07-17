@@ -16,8 +16,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "927A36E1300148DB0090B7AF"
-               BuildableName = "llama Mail.app"
-               BlueprintName = "llama Mail for Mac"
+               BuildableName = "KyPost.app"
+               BlueprintName = "KyPost"
                ReferencedContainer = "container:llama Mail for Mac.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -50,8 +50,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "927A36E1300148DB0090B7AF"
-            BuildableName = "llama Mail.app"
-            BlueprintName = "llama Mail for Mac"
+            BuildableName = "KyPost.app"
+            BlueprintName = "KyPost"
             ReferencedContainer = "container:llama Mail for Mac.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -67,8 +67,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "927A36E1300148DB0090B7AF"
-            BuildableName = "llama Mail.app"
-            BlueprintName = "llama Mail for Mac"
+            BuildableName = "KyPost.app"
+            BlueprintName = "KyPost"
             ReferencedContainer = "container:llama Mail for Mac.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

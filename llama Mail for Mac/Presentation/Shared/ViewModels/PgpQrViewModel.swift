@@ -9,7 +9,7 @@
 //  Both map NetworkError → state here rather than in PgpQrClient, because the
 //  mapping is only unambiguous once you know which endpoint you called: the
 //  shared NetworkError collapses 401/403 into .unauthorized. On /token that
-//  can only have been a 401 (it is session-authenticated); on /key it can only
+//  can only have been a 401 (it is pairing-authenticated); on /key it can only
 //  have been a 403 (it has no auth to reject). See PgpQrClient's header.
 //
 
@@ -22,14 +22,14 @@ import Observation
 @MainActor
 final class MyPgpQrViewModel {
     enum State: Equatable {
-        /// No desktop session — nothing to authenticate the mint call with.
+        /// No relay pairing — nothing to authenticate the mint call with.
         case needsPairing
         case loading
         case showing(urlString: String, expiresAt: Date)
         /// 400 — this account has no PGP identity configured yet.
         case noPgpIdentity
-        /// 401 — credentials rejected.
-        case sessionExpired
+        /// 401 — the server rejected this device's pairing credentials.
+        case pairingRejected
         /// 503 — server-side config gap. Static: never auto-retried.
         case unavailable
         case failed(String)
@@ -40,15 +40,15 @@ final class MyPgpQrViewModel {
     private static let refreshLeadTime: TimeInterval = 10
 
     private let client: PgpQrClient
-    private let sessionStore: DesktopSessionStore
+    private let pairingStore: SecurePairingStore
 
     private(set) var state: State = .loading
     /// Drives the countdown; updated by `observeExpiry()` while visible.
     private(set) var now = Date()
 
-    init(client: PgpQrClient, sessionStore: DesktopSessionStore) {
+    init(client: PgpQrClient, pairingStore: SecurePairingStore) {
         self.client = client
-        self.sessionStore = sessionStore
+        self.pairingStore = pairingStore
     }
 
     /// Whole seconds until the shown code expires, or nil when none is shown.
@@ -58,15 +58,15 @@ final class MyPgpQrViewModel {
     }
 
     func refresh() async {
-        guard let session = sessionStore.activeSession() else {
+        guard let pairing = try? pairingStore.loadPairing() else {
             state = .needsPairing
             return
         }
         state = .loading
         do {
             let response = try await client.fetchToken(
-                serverUrl: session.srv,
-                headers: session.authorizationHeaders
+                serverUrl: pairing.srv,
+                auth: RelayAuth(pairing: pairing)
             )
             guard let expiresAt = response.expiresAtDate else {
                 state = .failed("The server sent an expiry date this app couldn't read.")
@@ -75,7 +75,7 @@ final class MyPgpQrViewModel {
             now = Date()
             state = .showing(urlString: response.url, expiresAt: expiresAt)
         } catch NetworkError.unauthorized {
-            state = .sessionExpired
+            state = .pairingRejected
         } catch NetworkError.serviceUnavailable {
             state = .unavailable
         } catch NetworkError.server(statusCode: 400) {

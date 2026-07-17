@@ -20,7 +20,9 @@ struct MacPreferencesView: View {
         mailRepository: SingletonGraph.shared.mailRepository,
         keywordRepository: SingletonGraph.shared.keywordRepository,
         contactsSettingsStore: SingletonGraph.shared.contactsSettingsStore,
-        systemContactsExporter: SingletonGraph.shared.systemContactsExporter
+        systemContactsExporter: SingletonGraph.shared.systemContactsExporter,
+        deviceRegistrationService: SingletonGraph.shared.deviceRegistrationService,
+        pushNotificationDispatcher: SingletonGraph.shared.pushNotificationDispatcher
     )
 
     var body: some View {
@@ -38,7 +40,7 @@ struct MacPreferencesView: View {
                 .tabItem { Label("Contacts", systemImage: "person.crop.circle") }
 
             NotificationsPane(viewModel: viewModel)
-                .tabItem { Label("Notifications", systemImage: "bell.badge") }
+                .tabItem { Label("Notifications", systemImage: "bell") }
 
             EncryptionPane()
                 .tabItem { Label("Encryption", systemImage: "lock.shield") }
@@ -281,7 +283,7 @@ private struct ContactsPane: View {
                         Spacer()
                         if viewModel.hasExportedContacts {
                             Button("Remove Exported Contacts", role: .destructive) {
-                                viewModel.removeExportedContacts()
+                                Task { await viewModel.removeExportedContacts() }
                             }
                         }
                     }
@@ -314,6 +316,25 @@ private struct NotificationsPane: View {
                 LabeledContent("Delivery Mode", value: viewModel.deliveryMode)
             } footer: {
                 Text("In Pull mode this Mac checks for notifications every 90 seconds while running.")
+            }
+
+            Section {
+                HStack {
+                    Button("Fix Notifications") {
+                        Task { await viewModel.repairNotifications() }
+                    }
+                    .disabled(viewModel.isRepairingNotifications)
+                    Spacer()
+                }
+            } footer: {
+                Text("Checks notification permission, refreshes this Mac's push token, and re-registers it with the server. If the server no longer accepts the pairing, re-pair from the web app.")
+            }
+
+            if let message = viewModel.statusMessage {
+                Section {
+                    Text(message)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

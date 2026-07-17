@@ -119,7 +119,7 @@ enum SystemContactMapper {
     /// De-dupe identity across the app and Contacts.app: primary email when
     /// present (case-insensitive), else name + phone digits. Nil when there
     /// isn't enough signal to match safely.
-    static func matchKey(name: String, email: String, phone: String) -> String? {
+    nonisolated static func matchKey(name: String, email: String, phone: String) -> String? {
         let email = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if !email.isEmpty { return "email:\(email)" }
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -128,7 +128,7 @@ enum SystemContactMapper {
         return "name+phone:\(name)|\(digits)"
     }
 
-    static func matchKey(for contact: Contact) -> String? {
+    nonisolated static func matchKey(for contact: Contact) -> String? {
         matchKey(name: contact.name, email: contact.primaryEmail, phone: contact.primaryPhone)
     }
 

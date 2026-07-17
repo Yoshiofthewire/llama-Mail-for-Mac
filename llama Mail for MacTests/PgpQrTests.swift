@@ -31,50 +31,34 @@ private let keyJSON = #"""
 }
 """#
 
-@MainActor
-private func makeSessionStore(session: DesktopSession?) throws -> DesktopSessionStore {
-    let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
-    let store = DesktopSessionStore(keychain: keychain)
-    if let session {
-        try store.saveSession(session)
-    }
-    return store
-}
-
-private func activeSession() -> DesktopSession {
-    DesktopSession(
-        sessionToken: "sess-123",
-        expiresAt: Date().addingTimeInterval(3600),
-        userId: "u1",
-        userEmail: "ada@example.com",
-        srv: "https://mail.example.com",
-        pairedAt: Date()
-    )
-}
-
 // MARK: - Client
 
 @Suite struct PgpQrClientTests {
-    @Test func fetchTokenSendsBearerHeaderToTheTokenEndpoint() async throws {
+    @Test func fetchTokenSendsPairingAuthToTheTokenEndpoint() async throws {
         let capture = Box<URLRequest?>(nil)
         let client = PgpQrClient(httpClient: stubClient(json: tokenJSON) { capture.value = $0 })
 
         _ = try await client.fetchToken(
             serverUrl: "https://mail.example.com",
-            headers: ["Authorization": "Bearer sess-123"]
+            auth: RelayAuth(sub: "u1", hash: "h1")
         )
 
         let request = try #require(capture.value)
-        #expect(request.url?.absoluteString == "https://mail.example.com/api/pgp/qr/token")
-        #expect(request.httpMethod == "GET")
+        // withMailAuth authenticates by sub/hash query params — the app has no
+        // web session cookie, so these are its only credential.
         #expect(
-            request.value(forHTTPHeaderField: "Authorization") == "Bearer sess-123"
+            request.url?.absoluteString
+                == "https://mail.example.com/api/pgp/qr/token?sub=u1&hash=h1"
         )
+        #expect(request.httpMethod == "GET")
     }
 
     @Test func fetchTokenDecodesTheMintedCode() async throws {
         let client = PgpQrClient(httpClient: stubClient(json: tokenJSON))
-        let response = try await client.fetchToken(serverUrl: "https://mail.example.com", headers: [:])
+        let response = try await client.fetchToken(
+            serverUrl: "https://mail.example.com",
+            auth: RelayAuth(sub: "u1", hash: "h1")
+        )
 
         #expect(response.token == "tok-abc")
         #expect(response.url == "https://mail.example.com/api/pgp/qr/key?t=tok-abc")
@@ -186,11 +170,11 @@ private func activeSession() -> DesktopSession {
     private func makeViewModel(
         status: Int = 200,
         json: String = tokenJSON,
-        session: DesktopSession? = activeSession()
+        paired: Bool = true
     ) throws -> MyPgpQrViewModel {
         MyPgpQrViewModel(
             client: PgpQrClient(httpClient: stubClient(status: status, json: json)),
-            sessionStore: try makeSessionStore(session: session)
+            pairingStore: try makePairedStore(paired: paired)
         )
     }
 
@@ -206,11 +190,11 @@ private func activeSession() -> DesktopSession {
         #expect(expiresAt == Date(timeIntervalSince1970: 1_784_109_720))
     }
 
-    @Test func withoutADesktopSessionItAsksForPairingAndNeverCallsTheServer() async throws {
+    @Test func withoutAPairingItAsksForPairingAndNeverCallsTheServer() async throws {
         let capture = Box<URLRequest?>(nil)
         let viewModel = MyPgpQrViewModel(
             client: PgpQrClient(httpClient: stubClient(json: tokenJSON) { capture.value = $0 }),
-            sessionStore: try makeSessionStore(session: nil)
+            pairingStore: try makePairedStore(paired: false)
         )
 
         await viewModel.refresh()
@@ -219,22 +203,12 @@ private func activeSession() -> DesktopSession {
         #expect(capture.value == nil)
     }
 
-    @Test func anExpiredSessionCountsAsNoSession() async throws {
-        var expired = activeSession()
-        expired.expiresAt = Date().addingTimeInterval(-60)
-        let viewModel = try makeViewModel(session: expired)
-
-        await viewModel.refresh()
-
-        #expect(viewModel.state == .needsPairing)
-    }
-
     // Each status is unambiguous on /token even though NetworkError is lossy:
     // 401 is the only status it collapses, since /token cannot return 403.
-    @Test func mapsRejectedCredentialsToSessionExpired() async throws {
+    @Test func mapsRejectedCredentialsToPairingRejected() async throws {
         let viewModel = try makeViewModel(status: 401)
         await viewModel.refresh()
-        #expect(viewModel.state == .sessionExpired)
+        #expect(viewModel.state == .pairingRejected)
     }
 
     @Test func mapsMissingPgpIdentityToItsOwnState() async throws {

@@ -5,11 +5,10 @@
 //  "My QR Code" (Client_PGP_Update.md): shows a short-lived pickup URL as a QR
 //  code for someone standing next to you to scan.
 //
-//  ⚠️ Blocked end-to-end on the backend: minting needs Bearer auth, which the
-//  server does not implement, and the endpoint that would mint this app's
-//  session token (POST /api/notifications/desktop/register) is unbuilt. Until
-//  both land this screen renders .needsPairing or .sessionExpired. The scan
-//  half (ScanPgpKeyView) works against today's server.
+//  Minting authenticates with the relay pairing credentials (sub/hash), the
+//  same trust boundary as contact sync — see PgpQrClient's header. So the
+//  screen works as soon as this computer is paired with the server; no
+//  separate desktop-code session is involved.
 //
 
 import SwiftUI
@@ -19,7 +18,7 @@ struct MyPgpQrCodeView: View {
 
     @State private var viewModel = MyPgpQrViewModel(
         client: SingletonGraph.shared.pgpQrClient,
-        sessionStore: SingletonGraph.shared.desktopSessionStore
+        pairingStore: SingletonGraph.shared.securePairingStore
     )
 
     var body: some View {
@@ -40,9 +39,9 @@ struct MyPgpQrCodeView: View {
                     "Set up a PGP key in the web app first, then come back.",
                     icon: "key"
                 )
-            case .sessionExpired:
+            case .pairingRejected:
                 retryable(
-                    "This computer's session has expired — pair it again to show your code.",
+                    "The server no longer recognizes this computer — pair it again to show your code.",
                     icon: "lock.slash"
                 )
             case .unavailable:

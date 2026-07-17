@@ -18,7 +18,9 @@ struct SettingsView: View {
         mailRepository: SingletonGraph.shared.mailRepository,
         keywordRepository: SingletonGraph.shared.keywordRepository,
         contactsSettingsStore: SingletonGraph.shared.contactsSettingsStore,
-        systemContactsExporter: SingletonGraph.shared.systemContactsExporter
+        systemContactsExporter: SingletonGraph.shared.systemContactsExporter,
+        deviceRegistrationService: SingletonGraph.shared.deviceRegistrationService,
+        pushNotificationDispatcher: SingletonGraph.shared.pushNotificationDispatcher
     )
     @State private var showPairingSheet = false
 
@@ -76,9 +78,18 @@ struct SettingsView: View {
             }
             .listRowBackground(theme.panel)
 
-            Section("Notifications") {
+            Section {
                 Toggle("Enable system notifications", isOn: $viewModel.systemNotificationsEnabled)
                 LabeledContent("Delivery Mode", value: viewModel.deliveryMode)
+                Button("Fix Notifications") {
+                    Task { await viewModel.repairNotifications() }
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(viewModel.isRepairingNotifications)
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("Checks notification permission, refreshes this device's push token, and re-registers it with the server.")
             }
             .listRowBackground(theme.panel)
 
@@ -98,7 +109,9 @@ struct SettingsView: View {
                     .buttonStyle(SecondaryButtonStyle())
                 }
                 if viewModel.hasExportedContacts {
-                    Button("Remove Exported Contacts") { viewModel.removeExportedContacts() }
+                    Button("Remove Exported Contacts") {
+                        Task { await viewModel.removeExportedContacts() }
+                    }
                         .buttonStyle(DangerButtonStyle())
                 }
             } header: {

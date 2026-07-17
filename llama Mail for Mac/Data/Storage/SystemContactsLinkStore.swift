@@ -115,6 +115,12 @@ final class SystemContactsBaselineStore {
         Set(defaults.stringArray(forKey: Self.key) ?? [])
     }
 
+    /// Forgets the capture entirely; the next reconcile recaptures from the
+    /// cards present at that moment.
+    func clear() {
+        defaults.removeObject(forKey: Self.key)
+    }
+
     /// Marks a card as never-import again (used when an imported link is
     /// forgotten but the user's card is kept).
     func add(_ identifier: String) {

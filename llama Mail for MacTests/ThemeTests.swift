@@ -2,8 +2,9 @@
 //  ThemeTests.swift
 //  llama Mail for MacTests
 //
-//  Phase 6 tests: theme palette binding contract (13 themes identical to web
-//  theme.ts), readableOn behavior, ThemeManager persistence, inbox filtering.
+//  Phase 6 tests: theme palette binding contract (the 13 web theme.ts themes
+//  plus the two Ky brand themes), readableOn behavior, ThemeManager
+//  persistence, inbox filtering.
 //
 
 import Foundation
@@ -14,23 +15,24 @@ import Testing
 // MARK: - Palette contract
 
 @Suite struct ThemePaletteTests {
-    @Test func thirteenThemesMatchWebList() {
-        // Exact list + order from web THEME_OPTIONS.
+    @Test func themesMatchWebListPlusKyBrandThemes() {
+        // Exact list + order from web THEME_OPTIONS, followed by the two
+        // brand-refresh Ky themes.
         #expect(AppTheme.themeNames == [
             "Dark Matter", "Light Matter", "Tropics", "Tropic Night", "Ocean",
             "Coffee", "White Cliffs", "Cyber Punk", "Neon Purple", "Space",
-            "Sky", "Forest", "Sun",
+            "Sky", "Forest", "Sun", "Patina Ky", "Polished Ky",
         ])
-        #expect(AppTheme.themeNames.count == 13)
+        #expect(AppTheme.themeNames.count == 15)
         for name in AppTheme.themeNames {
             #expect(AppTheme.palettes[name] != nil, "Missing palette for \(name)")
         }
     }
 
-    @Test func defaultThemeIsDarkMatter() {
-        #expect(AppTheme.defaultThemeName == "Dark Matter")
+    @Test func defaultThemeIsPatinaKy() {
+        #expect(AppTheme.defaultThemeName == "Patina Ky")
         // Unknown names fall back to the default palette.
-        #expect(AppTheme.palette(named: "Nope") == AppTheme.palette(named: "Dark Matter"))
+        #expect(AppTheme.palette(named: "Nope") == AppTheme.palette(named: "Patina Ky"))
     }
 
     @Test func spotCheckHexValuesAgainstThemeTs() {
@@ -46,7 +48,9 @@ import Testing
     @Test func lightThemesGetLightColorScheme() {
         // Light themes must run the light system appearance so default text
         // (labels, titles, fields) is dark on their light backgrounds.
-        let lightThemes = ["Light Matter", "Tropics", "White Cliffs", "Sky", "Sun"]
+        let lightThemes = [
+            "Light Matter", "Tropics", "White Cliffs", "Sky", "Sun", "Polished Ky",
+        ]
         for name in AppTheme.themeNames {
             let palette = AppTheme.palette(named: name)
             let expected = lightThemes.contains(name)
@@ -75,7 +79,7 @@ import Testing
         let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
 
         let manager = ThemeManager(defaults: defaults)
-        #expect(manager.themeName == "Dark Matter")
+        #expect(manager.themeName == "Patina Ky")
 
         manager.setTheme(named: "Ocean")
         #expect(manager.themeName == "Ocean")
