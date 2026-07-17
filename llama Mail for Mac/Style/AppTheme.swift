@@ -2,7 +2,7 @@
 //  AppTheme.swift
 //  llama Mail
 //
-//  Theme palettes (spec §6, STYLE_GUIDE.md §1). Binding contract: the 13
+//  Theme palettes (spec §6, STYLE_GUIDE.md §1). Binding contract: the 15
 //  theme names and hex values are numerically identical to web theme.ts and
 //  Android AppTheme.kt — if a hex changes on one side, port it the same day.
 //  Mobile uses bg/panel/ink/inkStrong/accent/line + accentSoft (the one extra
@@ -55,10 +55,10 @@ enum AppTheme {
     static let themeNames: [String] = [
         "Dark Matter", "Light Matter", "Tropics", "Tropic Night", "Ocean",
         "Coffee", "White Cliffs", "Cyber Punk", "Neon Purple", "Space",
-        "Sky", "Forest", "Sun",
+        "Sky", "Forest", "Sun", "Patina Ky", "Polished Ky",
     ]
 
-    static let defaultThemeName = "Dark Matter"
+    static let defaultThemeName = "Patina Ky"
 
     /// Values transcribed from frontend theme.ts — do not edit independently.
     static let palettes: [String: ThemePalette] = [
@@ -113,6 +113,14 @@ enum AppTheme {
         "Sun": ThemePalette(
             bg: 0xFFF3DC, panel: 0xFFF9EC, ink: 0x5A4024, inkStrong: 0x392611,
             accent: 0xE0AB4F, accentSoft: 0xF1D9A2, line: 0xD4B27A
+        ),
+        "Patina Ky": ThemePalette(
+            bg: 0x0D0F14, panel: 0x161A22, ink: 0x64748B, inkStrong: 0xE2E8F0,
+            accent: 0x4DEEEA, accentSoft: 0x0E4A48, line: 0x1E293B
+        ),
+        "Polished Ky": ThemePalette(
+            bg: 0xEEF2F6, panel: 0xFFFFFF, ink: 0x475569, inkStrong: 0x0F172A,
+            accent: 0x0891B2, accentSoft: 0xCFFAFE, line: 0xCBD5E1
         ),
     ]
 

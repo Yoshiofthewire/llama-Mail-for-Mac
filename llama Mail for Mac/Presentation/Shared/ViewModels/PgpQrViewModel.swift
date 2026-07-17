@@ -136,7 +136,7 @@ final class ScanPgpKeyViewModel {
     func handleScannedPayload(_ payload: String) async {
         guard let url = PgpQrClient.keyURL(fromScannedPayload: payload) else {
             state = .failed(
-                message: "That doesn't look like a llama Mail key code.",
+                message: "That doesn't look like a KyPost key code.",
                 canRescan: true
             )
             return
@@ -164,7 +164,7 @@ final class ScanPgpKeyViewModel {
             )
         } catch NetworkError.server(statusCode: 400) {
             state = .failed(
-                message: "That doesn't look like a llama Mail key code.",
+                message: "That doesn't look like a KyPost key code.",
                 canRescan: true
             )
         } catch {

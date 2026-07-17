@@ -160,7 +160,7 @@ final class SettingsViewModel {
             exportContactsToSystem = false
             suppressExportToggle = false
             contactsExportDenied = true
-            statusMessage = "Contacts access is denied. Allow llama Mail under "
+            statusMessage = "Contacts access is denied. Allow KyPost under "
                 + "System Settings > Privacy & Security > Contacts."
             return
         }

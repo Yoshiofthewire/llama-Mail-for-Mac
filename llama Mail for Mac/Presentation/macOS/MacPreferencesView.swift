@@ -76,7 +76,7 @@ private struct ConnectionPane: View {
                         }
                     }
                 } else {
-                    Text("Pair this Mac with your Llama Mail account to load mail.")
+                    Text("Pair this Mac with your KyPost account to load mail.")
                         .foregroundStyle(.secondary)
                 }
             } header: {
@@ -258,7 +258,7 @@ private struct ContactsPane: View {
                 Toggle("Sync contacts with Apple Contacts", isOn: $viewModel.exportContactsToSystem)
                 if viewModel.contactsExportDenied {
                     HStack {
-                        Text("Contacts access is denied for llama Mail.")
+                        Text("Contacts access is denied for KyPost.")
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button("Open System Settings") {
@@ -267,7 +267,7 @@ private struct ContactsPane: View {
                     }
                 }
             } footer: {
-                Text("Contacts sync both ways: new cards you add in Apple Contacts are imported, matching contacts (same email) are linked instead of duplicated, and only cards created or imported by llama Mail are ever updated or removed.")
+                Text("Contacts sync both ways: new cards you add in Apple Contacts are imported, matching contacts (same email) are linked instead of duplicated, and only cards created or imported by KyPost are ever updated or removed.")
             }
 
             if viewModel.exportContactsToSystem || viewModel.hasExportedContacts {
@@ -286,7 +286,7 @@ private struct ContactsPane: View {
                         }
                     }
                 } footer: {
-                    Text("Re-export recreates cards that were removed from Apple Contacts outside llama Mail.")
+                    Text("Re-export recreates cards that were removed from Apple Contacts outside KyPost.")
                 }
             }
 

@@ -74,7 +74,7 @@ final class DesktopRegistrationClient: Sendable {
     // MARK: - App identity sent with the register request
 
     private static var appName: String {
-        Bundle.main.infoDictionary?["CFBundleName"] as? String ?? "llama Mail"
+        Bundle.main.infoDictionary?["CFBundleName"] as? String ?? "KyPost"
     }
 
     private static var appVersion: String {

@@ -49,7 +49,7 @@ struct SettingsView: View {
                         StatusBadgeView(label: "Not paired", isActive: false)
                         Spacer()
                     }
-                    Text("Pair this device with your Llama Mail account to load mail.")
+                    Text("Pair this device with your KyPost account to load mail.")
                         .font(AppFont.ui(13))
                         .foregroundStyle(theme.ink.opacity(0.8))
                     Button("Pair Device") { showPairingSheet = true }
@@ -85,7 +85,7 @@ struct SettingsView: View {
             Section {
                 Toggle("Sync with Apple Contacts", isOn: $viewModel.exportContactsToSystem)
                 if viewModel.contactsExportDenied {
-                    Text("Contacts access is denied for llama Mail.")
+                    Text("Contacts access is denied for KyPost.")
                         .font(AppFont.ui(13))
                         .foregroundStyle(theme.ink.opacity(0.8))
                     Button("Open Settings") { viewModel.openContactsPrivacySettings() }
@@ -104,7 +104,7 @@ struct SettingsView: View {
             } header: {
                 Text("Contacts")
             } footer: {
-                Text("Contacts sync both ways: new cards you add in Apple Contacts are imported, matching contacts (same email) are linked instead of duplicated, and only cards created or imported by llama Mail are ever updated or removed.")
+                Text("Contacts sync both ways: new cards you add in Apple Contacts are imported, matching contacts (same email) are linked instead of duplicated, and only cards created or imported by KyPost are ever updated or removed.")
             }
             .listRowBackground(theme.panel)
 

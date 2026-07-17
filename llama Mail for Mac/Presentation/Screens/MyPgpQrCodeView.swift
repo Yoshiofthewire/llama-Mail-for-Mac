@@ -84,7 +84,7 @@ struct MyPgpQrCodeView: View {
                     .foregroundStyle(theme.ink)
             }
 
-            Text("Have them scan this in llama Mail to add your public key.")
+            Text("Have them scan this in KyPost to add your public key.")
                 .font(AppFont.ui(14))
                 .foregroundStyle(theme.ink)
                 .multilineTextAlignment(.center)

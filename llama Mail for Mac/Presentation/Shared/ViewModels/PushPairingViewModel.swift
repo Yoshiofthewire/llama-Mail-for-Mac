@@ -66,7 +66,7 @@ final class PushPairingViewModel {
     func pairFromScannedCode(_ payload: String) async {
         guard let url = URL(string: payload.trimmingCharacters(in: .whitespacesAndNewlines)),
               let params = try? PairingLinkParser.parse(url) else {
-            state = .failed("That QR code isn't a llama Mail pairing code.")
+            state = .failed("That QR code isn't a KyPost pairing code.")
             return
         }
         await pair(params: params)
