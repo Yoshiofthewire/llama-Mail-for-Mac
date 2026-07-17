@@ -1,8 +1,10 @@
-# llama Mail for Mac
+# KyPost
 
-A native SwiftUI mail client for macOS and iOS that connects to a llama-labels mail relay. It is a port of the Android reference app (`llama-mobile`), sharing the same wire contracts, theme palettes, and pairing flows.
+A native SwiftUI mail client for macOS and iOS that connects to a KyPost mail relay. 
 
 The app talks only to the relay backend — there is no direct IMAP/SMTP. You pair a device once (QR code or deep link) and the relay handles mail access, server-side keyword tabs, push notifications, and contact sync.
+
+> **Naming:** the app is branded **KyPost** (Dock/Home Screen label, About screen, permission prompts). The Xcode project, scheme, and folders are still named `llama Mail for Mac`, and structural identifiers — bundle IDs and the `llamalabels://` deep-link scheme — are deliberately unchanged.
 
 ## Features
 
@@ -13,8 +15,9 @@ The app talks only to the relay backend — there is no direct IMAP/SMTP. You pa
 - **Compose & send** through the relay.
 - **Push notifications** (APNs) for new mail and MFA challenges, with a pull-polling fallback (90 s foreground, background refresh on iOS).
 - **MFA approval** — approve login challenges from a notification tap.
-- **Contact sync** — two-way sync with the relay, with local-first edits and conflict-safe reconciliation.
-- **13 themes** — palettes shared verbatim with the web and Android apps.
+- **Contact sync** — two-way sync with the relay, with local-first edits and conflict-safe reconciliation. Contacts carry the full extended schema: groups, photo, IM/social handles, websites, relations, extra dates, phonetic names, department, custom fields, pronouns, and a PGP public key.
+- **PGP key exchange via QR** — share your public key in person. *My QR Code* renders a short-lived (2 min) pickup link; *Scan to add contact key* reads someone else's, shows their fingerprint for out-of-band confirmation, and saves the key to a contact. iOS scans with the camera (paste as a fallback); macOS pastes the link (no VisionKit scanner).
+- **15 themes** — palettes shared verbatim with the web and Android apps; default is **Patina Ky**.
 
 ## Requirements
 
@@ -56,6 +59,8 @@ The relay endpoints and payload shapes are defined by the Android reference repo
 - `POST /api/inbox/actions` — bulk read/archive/spam/delete/move
 - `POST /api/mail/send` — comma-joined recipient strings
 - `GET/POST /api/contacts/sync` — cursor-based contact sync
+- `GET /api/pgp/qr/token` — mint a 2-minute PGP key-pickup token/URL (pairing-auth `sub`/`hash`)
+- `GET /api/pgp/qr/key?t=` — fetch a scanned public key + fingerprint (token is the credential)
 - `POST /api/notifications/native/register` — APNs device registration
 
 When touching any of these, check the Android implementation first rather than guessing.
@@ -77,7 +82,7 @@ Network-facing tests run against a stubbed `HTTPClient` — no backend needed.
 - Read/archive/delete actions from the reader (move-via-drag exists on macOS)
 - Drafts saved to the server
 - Server-side search (search runs against the local cache)
-- QR scanning via camera on macOS (paste-link and deep-link pairing work)
+- QR scanning via camera on macOS — pairing and PGP-key links must be pasted (camera scanning works on iOS)
 
 ## License
 
