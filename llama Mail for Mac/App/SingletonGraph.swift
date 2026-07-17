@@ -135,6 +135,7 @@ final class SingletonGraph {
 
     private static let legacyContactFieldsMigratedKey = "contacts.legacyFieldsMigrated"
     private static let reconciliationRepairKey = "contacts.reconciliationRepair.v1"
+    private static let systemImportDupeRepairKey = "contacts.systemImportDupeRepair.v1"
     private let userDefaults: UserDefaults
 
     /// One-time data backfills after schema migrations (the V1→V2 legacy
@@ -155,6 +156,23 @@ final class SingletonGraph {
                 userDefaults.set(true, forKey: Self.reconciliationRepairKey)
             } catch {
                 Log.sync.error("Contact reconciliation repair failed: \(error.localizedDescription)")
+            }
+        }
+        if !userDefaults.bool(forKey: Self.systemImportDupeRepairKey) {
+            do {
+                let removed = try await contactDAO.repairImportedDuplicates()
+                // The links and baseline reference drifted card identifiers;
+                // forgetting both makes the next reconcile recapture the
+                // baseline and re-adopt cards by identity instead of
+                // re-importing or deleting anything.
+                systemContactsLinkStore.clear()
+                systemContactsBaselineStore.clear()
+                userDefaults.set(true, forKey: Self.systemImportDupeRepairKey)
+                if removed > 0 {
+                    Log.sync.info("Removed \(removed) duplicate imported contacts")
+                }
+            } catch {
+                Log.sync.error("Contact import-dupe repair failed: \(error.localizedDescription)")
             }
         }
     }

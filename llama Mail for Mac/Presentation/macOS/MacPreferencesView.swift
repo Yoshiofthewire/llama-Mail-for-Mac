@@ -20,7 +20,9 @@ struct MacPreferencesView: View {
         mailRepository: SingletonGraph.shared.mailRepository,
         keywordRepository: SingletonGraph.shared.keywordRepository,
         contactsSettingsStore: SingletonGraph.shared.contactsSettingsStore,
-        systemContactsExporter: SingletonGraph.shared.systemContactsExporter
+        systemContactsExporter: SingletonGraph.shared.systemContactsExporter,
+        deviceRegistrationService: SingletonGraph.shared.deviceRegistrationService,
+        pushNotificationDispatcher: SingletonGraph.shared.pushNotificationDispatcher
     )
 
     var body: some View {
@@ -38,7 +40,7 @@ struct MacPreferencesView: View {
                 .tabItem { Label("Contacts", systemImage: "person.crop.circle") }
 
             NotificationsPane(viewModel: viewModel)
-                .tabItem { Label("Notifications", systemImage: "bell.badge") }
+                .tabItem { Label("Notifications", systemImage: "bell") }
 
             EncryptionPane()
                 .tabItem { Label("Encryption", systemImage: "lock.shield") }
@@ -76,7 +78,7 @@ private struct ConnectionPane: View {
                         }
                     }
                 } else {
-                    Text("Pair this Mac with your Llama Mail account to load mail.")
+                    Text("Pair this Mac with your KyPost account to load mail.")
                         .foregroundStyle(.secondary)
                 }
             } header: {
@@ -258,7 +260,7 @@ private struct ContactsPane: View {
                 Toggle("Sync contacts with Apple Contacts", isOn: $viewModel.exportContactsToSystem)
                 if viewModel.contactsExportDenied {
                     HStack {
-                        Text("Contacts access is denied for llama Mail.")
+                        Text("Contacts access is denied for KyPost.")
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button("Open System Settings") {
@@ -267,7 +269,7 @@ private struct ContactsPane: View {
                     }
                 }
             } footer: {
-                Text("Contacts sync both ways: new cards you add in Apple Contacts are imported, matching contacts (same email) are linked instead of duplicated, and only cards created or imported by llama Mail are ever updated or removed.")
+                Text("Contacts sync both ways: new cards you add in Apple Contacts are imported, matching contacts (same email) are linked instead of duplicated, and only cards created or imported by KyPost are ever updated or removed.")
             }
 
             if viewModel.exportContactsToSystem || viewModel.hasExportedContacts {
@@ -281,12 +283,12 @@ private struct ContactsPane: View {
                         Spacer()
                         if viewModel.hasExportedContacts {
                             Button("Remove Exported Contacts", role: .destructive) {
-                                viewModel.removeExportedContacts()
+                                Task { await viewModel.removeExportedContacts() }
                             }
                         }
                     }
                 } footer: {
-                    Text("Re-export recreates cards that were removed from Apple Contacts outside llama Mail.")
+                    Text("Re-export recreates cards that were removed from Apple Contacts outside KyPost.")
                 }
             }
 
@@ -314,6 +316,25 @@ private struct NotificationsPane: View {
                 LabeledContent("Delivery Mode", value: viewModel.deliveryMode)
             } footer: {
                 Text("In Pull mode this Mac checks for notifications every 90 seconds while running.")
+            }
+
+            Section {
+                HStack {
+                    Button("Fix Notifications") {
+                        Task { await viewModel.repairNotifications() }
+                    }
+                    .disabled(viewModel.isRepairingNotifications)
+                    Spacer()
+                }
+            } footer: {
+                Text("Checks notification permission, refreshes this Mac's push token, and re-registers it with the server. If the server no longer accepts the pairing, re-pair from the web app.")
+            }
+
+            if let message = viewModel.statusMessage {
+                Section {
+                    Text(message)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

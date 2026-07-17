@@ -113,6 +113,47 @@ actor ContactDAO {
         }
     }
 
+    /// One-time cleanup of duplicates created by the system-contacts
+    /// sync-back import: unified card identifiers drift when macOS re-links
+    /// cards (our own exports trigger that), and every drift re-imported the
+    /// address book as fresh uid-less rows. Rows group by identity (primary
+    /// email, else name+phone, else display name); each group keeps its best
+    /// row — a synced one when present, else the oldest — and only ever
+    /// deletes uid-less rows still waiting to sync, the only kind the import
+    /// path creates. Returns how many rows were removed.
+    func repairImportedDuplicates() throws -> Int {
+        let entities = try modelContext.fetch(FetchDescriptor<ContactEntity>())
+        var groups: [String: [ContactEntity]] = [:]
+        for entity in entities {
+            let contact = entity.toDomain
+            let name = contact.name
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard let key = SystemContactMapper.matchKey(for: contact)
+                ?? (name.isEmpty ? nil : "name:\(name)") else { continue }
+            groups[key, default: []].append(entity)
+        }
+
+        var removed = 0
+        for group in groups.values where group.count > 1 {
+            let ordered = group.sorted { lhs, rhs in
+                let lhsSynced = !(lhs.uid ?? "").isEmpty
+                let rhsSynced = !(rhs.uid ?? "").isEmpty
+                if lhsSynced != rhsSynced { return lhsSynced }
+                return lhs.createdAt < rhs.createdAt
+            }
+            for entity in ordered.dropFirst()
+            where entity.needsSync && (entity.uid ?? "").isEmpty {
+                modelContext.delete(entity)
+                removed += 1
+            }
+        }
+        if removed > 0 {
+            try modelContext.save()
+        }
+        return removed
+    }
+
     func clearNeedsSync(localIds: [UUID]) throws {
         for localId in localIds {
             try fetchEntity(localId: localId)?.needsSync = false

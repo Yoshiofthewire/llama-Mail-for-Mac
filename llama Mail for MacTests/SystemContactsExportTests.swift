@@ -30,11 +30,11 @@ private final class MockSystemContactStore: SystemContactStoring {
 
     func requestAccess() async throws -> Bool { accessGranted }
 
-    func fetch(identifier: String) throws -> CNContact? { cards[identifier] }
+    func fetch(identifier: String) async throws -> CNContact? { cards[identifier] }
 
     func listAll() async throws -> [CNContact] { Array(cards.values) }
 
-    func add(_ contact: CNMutableContact) throws {
+    func add(_ contact: CNMutableContact) async throws {
         addCount += 1
         if failNextAdd {
             failNextAdd = false
@@ -43,16 +43,21 @@ private final class MockSystemContactStore: SystemContactStoring {
         cards[contact.identifier] = contact.copy() as? CNContact
     }
 
-    func update(_ contact: CNMutableContact) throws {
+    func update(_ contact: CNMutableContact) async throws {
         updateCount += 1
         if failingIdentifiers.contains(contact.identifier) { throw StubError() }
         cards[contact.identifier] = contact.copy() as? CNContact
     }
 
-    func delete(identifier: String) throws {
+    func delete(identifier: String) async throws {
         deleteCount += 1
         if failingIdentifiers.contains(identifier) { throw StubError() }
         cards[identifier] = nil
+    }
+
+    /// Test seeding without touching the add/fail counters.
+    func seed(_ contact: CNContact) {
+        cards[contact.identifier] = contact.copy() as? CNContact
     }
 }
 
@@ -631,7 +636,7 @@ private func makeCard(
 
         // The card vanishes without the contact changing (deleted in
         // Contacts.app, or its account was removed from the device).
-        try env.mock.delete(identifier: original.cnIdentifier)
+        try await env.mock.delete(identifier: original.cnIdentifier)
 
         let summary = await env.exporter.reconcileAll()
         #expect(summary.created == 1)
@@ -683,7 +688,7 @@ private func makeCard(
     @Test func firstReconcileAdoptsMatchingDeviceCardInsteadOfDuplicating() async throws {
         let env = try makeEnvironment()
         // Same person known to both the device and the relay before first sync.
-        try env.mock.add(makeCard()) // Grace Hopper, grace@example.com
+        try await env.mock.add(makeCard()) // Grace Hopper, grace@example.com
         try await env.dao.upsert(contacts: [
             makeContact(name: "Grace Hopper", email: "grace@example.com"),
         ])
@@ -707,7 +712,7 @@ private func makeCard(
         try await env.dao.upsert(contacts: [
             makeContact(name: "Grace Hopper", email: "grace@example.com"),
         ])
-        try env.mock.add(makeCard())
+        try await env.mock.add(makeCard())
 
         let summary = await env.exporter.reconcileAll()
         #expect(summary.adopted == 1)
@@ -719,7 +724,7 @@ private func makeCard(
 
     @Test func exportUpsertAdoptsMatchingCard() async throws {
         let env = try makeEnvironment()
-        try env.mock.add(makeCard())
+        try await env.mock.add(makeCard())
         await env.exporter.exportUpsert(
             makeContact(name: "Grace Hopper", email: "grace@example.com")
         )
@@ -734,7 +739,7 @@ private func makeCard(
         card.emailAddresses.append(
             CNLabeledValue(label: CNLabelWork, value: "grace@work.example.com" as NSString)
         )
-        try env.mock.add(card)
+        try await env.mock.add(card)
         // The relay knows this person by their second (work) email.
         try await env.dao.upsert(contacts: [
             makeContact(name: "Grace Hopper", email: "grace@work.example.com"),
@@ -747,7 +752,7 @@ private func makeCard(
 
     @Test func adoptionPairsDuplicateEmailsOneToOne() async throws {
         let env = try makeEnvironment()
-        try env.mock.add(makeCard(given: "Grace", family: "Work"))
+        try await env.mock.add(makeCard(given: "Grace", family: "Work"))
         try await env.dao.upsert(contacts: [
             makeContact(name: "Grace Work", email: "grace@example.com"),
             makeContact(name: "Grace Home", email: "grace@example.com"),
@@ -763,7 +768,7 @@ private func makeCard(
 
     @Test func firstReconcileBaselinesExistingCardsInsteadOfImporting() async throws {
         let env = try makeEnvironment()
-        try env.mock.add(makeCard(given: "Preexisting", family: "Person"))
+        try await env.mock.add(makeCard(given: "Preexisting", family: "Person"))
         let summary = await env.exporter.reconcileAll()
         #expect(summary.imported == 0)
         #expect(env.baselineStore.isCaptured)
@@ -775,7 +780,7 @@ private func makeCard(
         let env = try makeEnvironment()
         await env.exporter.reconcileAll() // captures (empty) baseline
 
-        try env.mock.add(makeCard())
+        try await env.mock.add(makeCard())
         let summary = await env.exporter.reconcileAll()
         #expect(summary.imported == 1)
 
@@ -806,11 +811,11 @@ private func makeCard(
     @Test func removeAllExportedKeepsImportedUserCards() async throws {
         let env = try makeEnvironment()
         await env.exporter.reconcileAll() // captures (empty) baseline
-        try env.mock.add(makeCard())
+        try await env.mock.add(makeCard())
         await env.exporter.reconcileAll() // imports the user's card
         #expect(env.linkStore.all().count == 1)
 
-        let removed = env.exporter.removeAllExported()
+        let removed = await env.exporter.removeAllExported()
         #expect(removed == 0)
         #expect(env.mock.cards.count == 1) // user's card kept
         #expect(env.linkStore.all().isEmpty)
@@ -829,7 +834,7 @@ private func makeCard(
         await env.exporter.reconcileAll()
         #expect(env.mock.cards.count == 2)
 
-        let removed = env.exporter.removeAllExported()
+        let removed = await env.exporter.removeAllExported()
         #expect(removed == 2)
         #expect(env.mock.cards.isEmpty)
         #expect(env.linkStore.all().isEmpty)

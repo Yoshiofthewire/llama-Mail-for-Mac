@@ -24,6 +24,8 @@ final class SettingsViewModel {
     private let keywordRepository: KeywordRepository
     private let contactsSettingsStore: ContactsSettingsStore
     private let systemContactsExporter: SystemContactsExporter
+    private let deviceRegistrationService: DeviceRegistrationService
+    private let pushNotificationDispatcher: PushNotificationDispatcher
 
     var systemNotificationsEnabled: Bool {
         didSet { pushSettingsStore.systemNotificationsEnabled = systemNotificationsEnabled }
@@ -53,7 +55,9 @@ final class SettingsViewModel {
         mailRepository: MailRepository,
         keywordRepository: KeywordRepository,
         contactsSettingsStore: ContactsSettingsStore,
-        systemContactsExporter: SystemContactsExporter
+        systemContactsExporter: SystemContactsExporter,
+        deviceRegistrationService: DeviceRegistrationService,
+        pushNotificationDispatcher: PushNotificationDispatcher
     ) {
         self.securePairingStore = securePairingStore
         self.pushSettingsStore = pushSettingsStore
@@ -62,6 +66,8 @@ final class SettingsViewModel {
         self.keywordRepository = keywordRepository
         self.contactsSettingsStore = contactsSettingsStore
         self.systemContactsExporter = systemContactsExporter
+        self.deviceRegistrationService = deviceRegistrationService
+        self.pushNotificationDispatcher = pushNotificationDispatcher
         systemNotificationsEnabled = pushSettingsStore.systemNotificationsEnabled
         exportContactsToSystem = contactsSettingsStore.exportToSystemContactsEnabled
     }
@@ -100,6 +106,77 @@ final class SettingsViewModel {
         }
     }
 
+    // MARK: - Notification repair
+
+    /// True while "Fix Notifications" runs, so the button can't be re-pressed
+    /// into overlapping repairs.
+    private(set) var isRepairingNotifications = false
+
+    /// "Fix Notifications": walks the whole push setup in order — notification
+    /// permission, APNs token, server registration — and reports the first
+    /// broken step. Registration normally repeats silently on foreground, so
+    /// this exists to surface what that silence hides: after an app update the
+    /// APNs token can rotate while the stored pairing token has expired, the
+    /// re-register 401s, and the server keeps (or has already dropped) a dead
+    /// token. Only re-pairing mints a new pairing token, so that case ends in
+    /// a "re-pair" message rather than a fix.
+    func repairNotifications() async {
+        guard !isRepairingNotifications else { return }
+        isRepairingNotifications = true
+        defer { isRepairingNotifications = false }
+
+        guard isPaired else {
+            statusMessage = "Not paired — pair this device first."
+            return
+        }
+        statusMessage = "Fixing notifications…"
+
+        // Previously-denied permission returns false here without prompting.
+        guard await pushNotificationDispatcher.requestAuthorization() else {
+            statusMessage = "Notifications are turned off for KyPost — allow them under "
+                + "System Settings > Notifications, then try again."
+            return
+        }
+
+        guard let token = await refreshedDeviceToken() else {
+            statusMessage = "Apple hasn't issued a push token for this device — "
+                + "check your internet connection and try again."
+            return
+        }
+
+        switch await deviceRegistrationService.reregisterIfPaired(deviceToken: token) {
+        case .success:
+            statusMessage = "Notifications re-registered with "
+                + "\(pairedServerHost ?? "the server") — delivery mode \(deliveryMode)."
+        case .unauthorized:
+            statusMessage = "The server no longer accepts this device's pairing — "
+                + "re-pair from the web app to fix notifications."
+        case .backendMisconfigured:
+            statusMessage = "The server isn't configured for pairing — "
+                + "notifications can't be fixed from this device."
+        case .failure(let text):
+            statusMessage = "Could not re-register: \(text)"
+        case nil:
+            statusMessage = "Not paired — pair this device first."
+        }
+    }
+
+    /// Re-requests APNs registration and waits briefly for the delegate to
+    /// store the token, in case it rotated with an app update or never
+    /// arrived at launch. If a rotated token lands after the wait, the
+    /// delegate's own re-registration still carries it to the server.
+    private func refreshedDeviceToken() async -> String? {
+        #if os(macOS)
+        NSApplication.shared.registerForRemoteNotifications()
+        #elseif os(iOS)
+        UIApplication.shared.registerForRemoteNotifications()
+        #endif
+        for _ in 0..<8 where pushSettingsStore.lastDeviceToken == nil {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return pushSettingsStore.lastDeviceToken
+    }
+
     // MARK: - Desktop pairing (Desktop Pairing guide)
 
     /// Active desktop session, if any; expired sessions read as nil.
@@ -131,8 +208,8 @@ final class SettingsViewModel {
 
     /// Removes every card the app created in Apple Contacts and forgets the
     /// links; separate from the toggle, which keeps exported cards.
-    func removeExportedContacts() {
-        let removed = systemContactsExporter.removeAllExported()
+    func removeExportedContacts() async {
+        let removed = await systemContactsExporter.removeAllExported()
         hasExportedContacts = systemContactsExporter.hasExportedContacts()
         statusMessage = "Removed \(removed) exported contact(s) from Apple Contacts"
     }
@@ -160,7 +237,7 @@ final class SettingsViewModel {
             exportContactsToSystem = false
             suppressExportToggle = false
             contactsExportDenied = true
-            statusMessage = "Contacts access is denied. Allow llama Mail under "
+            statusMessage = "Contacts access is denied. Allow KyPost under "
                 + "System Settings > Privacy & Security > Contacts."
             return
         }

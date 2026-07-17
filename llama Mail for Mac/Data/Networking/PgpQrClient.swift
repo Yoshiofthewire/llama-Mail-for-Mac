@@ -3,9 +3,12 @@
 //  llama Mail
 //
 //  In-person PGP public-key exchange over QR (Client_PGP_Update.md), verified
-//  against the backend source 2026-07-15
-//  (llama-labels backend/internal/api/pgp_qr_handlers.go, server.go:238-239):
-//    Mint: GET {srv}/api/pgp/qr/token   — session-authenticated (withAuth)
+//  against the backend source 2026-07-17
+//  (llama-labels backend/internal/api/pgp_qr_handlers.go, server.go:245-246):
+//    Mint: GET {srv}/api/pgp/qr/token   — withMailAuth: web session cookie OR
+//                                         ?sub=&hash= pairing credentials.
+//                                         This app has no cookie, so it sends
+//                                         its relay pairing auth.
 //    Pick: GET {url from token}?t=…     — NO middleware; the ?t= token is the
 //                                         only gate, so it works unauthenticated
 //
@@ -54,19 +57,18 @@ final class PgpQrClient: Sendable {
         self.httpClient = httpClient
     }
 
-    /// GET {srv}/api/pgp/qr/token — mints a 2-minute pickup token for this
-    /// account's own key.
+    /// GET {srv}/api/pgp/qr/token?sub&hash — mints a 2-minute pickup token for
+    /// this account's own key.
     ///
-    /// Takes `DesktopSession.authorizationHeaders` (Bearer) per the documented
-    /// contract. ⚠️ Today's backend has no Bearer handling at all — `currentUser`
-    /// reads only the `llama_session` cookie — so this always 401s until the
-    /// backend ships it. MyPgpQrViewModel renders that as `.sessionExpired`.
+    /// Takes relay pairing auth (backend withMailAuth), the same credentials
+    /// contact sync uses — the backend accepts sub/hash query params precisely
+    /// because paired native clients have no web session cookie.
     ///
     /// Errors: 401 credentials rejected, 400 no PGP identity on the account,
     /// 503 pairing secret unset server-side.
     func fetchToken(
         serverUrl: String,
-        headers: [String: String]
+        auth: RelayAuth
     ) async throws -> PgpQrTokenResponse {
         guard let base = URL(string: serverUrl) else {
             throw NetworkError.invalidURL
@@ -74,7 +76,7 @@ final class PgpQrClient: Sendable {
         return try await httpClient.get(
             PgpQrTokenResponse.self,
             url: base.appending(path: "api/pgp/qr/token"),
-            headers: headers
+            query: auth.queryItems
         )
     }
 
