@@ -335,3 +335,16 @@ private let validPairingLink = URL(
         #expect(response.cursor == 7)
     }
 }
+
+@Suite struct RelayAuthTests {
+    @Test func headerFieldsReturnsSubscriberIdAndHashAsNamedHeaders() {
+        let auth = RelayAuth(sub: "sub-1", hash: "hash-1")
+
+        let fields = auth.headerFields
+
+        #expect(fields == [
+            "X-Kypost-Subscriber-Id": "sub-1",
+            "X-Kypost-Subscriber-Hash": "hash-1",
+        ])
+    }
+}
