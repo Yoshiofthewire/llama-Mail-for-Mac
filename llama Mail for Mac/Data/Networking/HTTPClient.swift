@@ -37,12 +37,8 @@ enum NetworkError: Error, Equatable {
     }
 }
 
-/// Relay auth credentials. headerFields sends them as
-/// X-Kypost-Subscriber-Id/X-Kypost-Subscriber-Hash headers -- the form
-/// every Relay call site is migrating to (server already accepts both,
-/// headers preferred). queryItems (legacy ?sub=&hash= query params) is
-/// being phased out call site by call site and deleted once nothing uses
-/// it anymore.
+/// Relay auth credentials, sent as X-Kypost-Subscriber-Id/X-Kypost-Subscriber-Hash
+/// headers on every request.
 struct RelayAuth: Equatable, Sendable {
     var sub: String
     var hash: String
@@ -54,10 +50,6 @@ struct RelayAuth: Equatable, Sendable {
 
     init(pairing: Pairing) {
         self.init(sub: pairing.sub, hash: pairing.hash)
-    }
-
-    var queryItems: [URLQueryItem] {
-        [URLQueryItem(name: "sub", value: sub), URLQueryItem(name: "hash", value: hash)]
     }
 
     var headerFields: [String: String] {
