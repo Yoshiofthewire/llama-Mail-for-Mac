@@ -141,8 +141,11 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
         let client = stubClient(json: json) { request in
             let url = request.url!.absoluteString
             #expect(url.hasPrefix("\(server)/api/notifications/native/pull?"))
-            #expect(url.contains("sub=u1"))
             #expect(url.contains("after=3"))
+            #expect(!url.contains("sub="))
+            #expect(!url.contains("hash="))
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") != nil)
         }
         let env = try makeEnvironment(client: client)
         env.cursorStore.advance(to: 3)

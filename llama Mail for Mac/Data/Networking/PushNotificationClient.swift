@@ -56,12 +56,13 @@ final class PushNotificationClient: Sendable {
         self.httpClient = httpClient
     }
 
-    /// GET {pullEndpoint}?sub=&hash=&after={cursor}
+    /// GET {pullEndpoint}?after={cursor}, with pairing auth as headers
     func pull(endpoint: URL, auth: RelayAuth, after cursor: Int) async throws -> PullResponse {
         try await httpClient.get(
             PullResponse.self,
             url: endpoint,
-            query: auth.queryItems + [URLQueryItem(name: "after", value: String(cursor))]
+            query: [URLQueryItem(name: "after", value: String(cursor))],
+            headers: auth.headerFields
         )
     }
 }
