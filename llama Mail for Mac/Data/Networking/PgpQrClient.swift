@@ -57,12 +57,12 @@ final class PgpQrClient: Sendable {
         self.httpClient = httpClient
     }
 
-    /// GET {srv}/api/pgp/qr/token?sub&hash — mints a 2-minute pickup token for
+    /// GET {srv}/api/pgp/qr/token — mints a 2-minute pickup token for
     /// this account's own key.
     ///
     /// Takes relay pairing auth (backend withMailAuth), the same credentials
-    /// contact sync uses — the backend accepts sub/hash query params precisely
-    /// because paired native clients have no web session cookie.
+    /// contact sync uses — the backend accepts X-Kypost-Subscriber-Id/X-Kypost-Subscriber-Hash
+    /// headers precisely because paired native clients have no web session cookie.
     ///
     /// Errors: 401 credentials rejected, 400 no PGP identity on the account,
     /// 503 pairing secret unset server-side.
@@ -76,7 +76,7 @@ final class PgpQrClient: Sendable {
         return try await httpClient.get(
             PgpQrTokenResponse.self,
             url: base.appending(path: "api/pgp/qr/token"),
-            query: auth.queryItems
+            headers: auth.headerFields
         )
     }
 

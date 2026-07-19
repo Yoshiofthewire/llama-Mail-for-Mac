@@ -44,12 +44,11 @@ private let keyJSON = #"""
         )
 
         let request = try #require(capture.value)
-        // withMailAuth authenticates by sub/hash query params — the app has no
-        // web session cookie, so these are its only credential.
-        #expect(
-            request.url?.absoluteString
-                == "https://mail.example.com/api/pgp/qr/token?sub=u1&hash=h1"
-        )
+        // Pairing auth now travels as headers, not query params (server prefers
+        // headers; the app has no web session cookie either way).
+        #expect(request.url?.absoluteString == "https://mail.example.com/api/pgp/qr/token")
+        #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+        #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
         #expect(request.httpMethod == "GET")
     }
 
