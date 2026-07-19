@@ -65,7 +65,7 @@ func makePairedStore(paired: Bool = true) throws -> SecurePairingStore {
     if paired {
         try store.savePairing(Pairing(
             sub: "u1",
-            hash: "h1",
+            deviceSecret: "s1",
             srv: server,
             registrationUrl: nil,
             pairingToken: "pt",

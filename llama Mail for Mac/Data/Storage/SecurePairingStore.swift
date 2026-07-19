@@ -3,8 +3,8 @@
 //  llama Mail
 //
 //  Keychain-backed store for relay pairing credentials (spec §1).
-//  Keys are a binding contract: sub, hash, srv, registrationUrl, pairingToken,
-//  lastDeviceId, pairedAtTimestamp.
+//  Keys are a binding contract: sub, deviceSecret, srv, registrationUrl,
+//  pairingToken, lastDeviceId, pairedAtTimestamp.
 //
 
 import Foundation
@@ -12,7 +12,11 @@ import Foundation
 /// Credentials produced by a successful native-pair registration.
 struct Pairing: Equatable, Sendable {
     var sub: String
-    var hash: String
+    /// Per-device pairing secret, minted once at registration and returned
+    /// only in that response — never carried in the pairing deep link/QR.
+    /// May be empty for a pairing created before this field existed
+    /// (pre-migration); that's not an error, see DeregisterDeviceUseCase.
+    var deviceSecret: String
     /// Relay server URL; sourced from pairing, never edited by the user.
     var srv: String
     var registrationUrl: String?
@@ -24,13 +28,13 @@ struct Pairing: Equatable, Sendable {
 final class SecurePairingStore: Sendable {
     private enum Key {
         static let sub = "sub"
-        static let hash = "hash"
+        static let deviceSecret = "deviceSecret"
         static let srv = "srv"
         static let registrationUrl = "registrationUrl"
         static let pairingToken = "pairingToken"
         static let lastDeviceId = "lastDeviceId"
         static let pairedAtTimestamp = "pairedAtTimestamp"
-        static let all = [sub, hash, srv, registrationUrl, pairingToken, lastDeviceId, pairedAtTimestamp]
+        static let all = [sub, deviceSecret, srv, registrationUrl, pairingToken, lastDeviceId, pairedAtTimestamp]
     }
 
     private let keychain: KeychainStorage
@@ -41,7 +45,7 @@ final class SecurePairingStore: Sendable {
 
     func savePairing(_ pairing: Pairing) throws {
         try keychain.set(pairing.sub, forKey: Key.sub)
-        try keychain.set(pairing.hash, forKey: Key.hash)
+        try keychain.set(pairing.deviceSecret, forKey: Key.deviceSecret)
         try keychain.set(pairing.srv, forKey: Key.srv)
         try keychain.set(pairing.pairingToken, forKey: Key.pairingToken)
         try keychain.set(
@@ -60,11 +64,13 @@ final class SecurePairingStore: Sendable {
         }
     }
 
-    /// Returns nil unless all required fields (sub, hash, srv, pairingToken) are present.
+    /// Returns nil unless all required fields (sub, srv, pairingToken) are
+    /// present. deviceSecret is deliberately NOT required: a pairing saved
+    /// before that field existed must still load as "paired" (with an empty
+    /// secret) rather than silently reading as unpaired.
     func loadPairing() throws -> Pairing? {
         guard
             let sub = try keychain.string(forKey: Key.sub), !sub.isEmpty,
-            let hash = try keychain.string(forKey: Key.hash), !hash.isEmpty,
             let srv = try keychain.string(forKey: Key.srv), !srv.isEmpty,
             let pairingToken = try keychain.string(forKey: Key.pairingToken), !pairingToken.isEmpty
         else { return nil }
@@ -75,7 +81,7 @@ final class SecurePairingStore: Sendable {
 
         return Pairing(
             sub: sub,
-            hash: hash,
+            deviceSecret: try keychain.string(forKey: Key.deviceSecret) ?? "",
             srv: srv,
             registrationUrl: try keychain.string(forKey: Key.registrationUrl),
             pairingToken: pairingToken,

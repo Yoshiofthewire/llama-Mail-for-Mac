@@ -20,9 +20,11 @@ struct SettingsView: View {
         contactsSettingsStore: SingletonGraph.shared.contactsSettingsStore,
         systemContactsExporter: SingletonGraph.shared.systemContactsExporter,
         deviceRegistrationService: SingletonGraph.shared.deviceRegistrationService,
+        deregisterDeviceUseCase: SingletonGraph.shared.deregisterDeviceUseCase,
         pushNotificationDispatcher: SingletonGraph.shared.pushNotificationDispatcher
     )
     @State private var showPairingSheet = false
+    @State private var showUnpairConfirmation = false
 
     var body: some View {
         Form {
@@ -44,7 +46,7 @@ struct SettingsView: View {
                     .buttonStyle(SecondaryButtonStyle())
                     Button("Re-pair Device") { showPairingSheet = true }
                         .buttonStyle(SecondaryButtonStyle())
-                    Button("Remove Pairing") { viewModel.unpair() }
+                    Button("Remove Pairing") { showUnpairConfirmation = true }
                         .buttonStyle(DangerButtonStyle())
                 } else {
                     HStack {
@@ -156,6 +158,18 @@ struct SettingsView: View {
         .sheet(isPresented: $showPairingSheet) {
             PushPairingView(initialParams: nil)
                 .environment(\.theme, theme)
+        }
+        .confirmationDialog(
+            "Unpair this device?",
+            isPresented: $showUnpairConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Unpair", role: .destructive) {
+                Task { await viewModel.unpair() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the device from your account's paired devices on the server and clears its local pairing. You'll need to scan a new QR code or pass a new link to pair again.")
         }
     }
 }

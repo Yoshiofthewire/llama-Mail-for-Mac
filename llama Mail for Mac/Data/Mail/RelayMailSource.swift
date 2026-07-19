@@ -4,9 +4,8 @@
 //
 //  MailSource backed by the relay endpoints, matching the Android reference
 //  RelayMailSource.kt / RelayModels.kt (Mobile_Mail_Relay.md) and verified
-//  against the live backend 2026-07-10. Pairing auth (subscriberId/
-//  subscriberHash) travels as headers (RelayAuth.headerFields), not query
-//  params:
+//  against the live backend 2026-07-10. Pairing auth (deviceId/deviceSecret)
+//  travels as headers (RelayAuth.headerFields), not query params:
 //    GET  /api/inbox?limit&mailbox&since
 //    GET  /api/inbox/folders
 //    POST /api/mail/send

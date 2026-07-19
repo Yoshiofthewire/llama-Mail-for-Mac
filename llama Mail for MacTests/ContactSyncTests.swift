@@ -709,8 +709,11 @@ private func makeDTO(
         let client = stubClient(json: #"{"mergedCount": 0, "groups": []}"#) { request in
             #expect(request.httpMethod == "POST")
             #expect(request.url?.absoluteString == "https://relay.example.com/api/contacts/dedupe")
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
+            // makePairedStore()'s fixture has no lastDeviceId — RelayAuth(pairing:)
+            // resolves that to an empty string, still sent as the header value
+            // (contacts sync/dedupe never required deviceId, unlike MFA respond).
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == "")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == "s1")
             // The backend never reads the body, but does expect valid JSON.
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body == "{}")

@@ -21,16 +21,15 @@ struct ApproveMfaChallengeUseCase {
         guard let pairing = try? securePairingStore.loadPairing() else {
             return .failure("Device is not paired")
         }
-        // The backend requires the responding device's ID so it can verify the
-        // device is still permitted to approve; without one, re-pairing is the
-        // only way to obtain it.
-        guard let deviceId = pairing.lastDeviceId, !deviceId.isEmpty else {
+        // The backend requires the responding device's ID and secret so it
+        // can verify the device is still permitted to approve; without both,
+        // re-pairing is the only way to obtain them.
+        guard let deviceId = pairing.lastDeviceId, !deviceId.isEmpty, !pairing.deviceSecret.isEmpty else {
             return .failure("Device registration is incomplete — re-pair this device")
         }
         return await client.respond(
             serverUrl: pairing.srv,
             auth: RelayAuth(pairing: pairing),
-            deviceId: deviceId,
             challengeId: challengeId,
             approved: approved
         )

@@ -37,23 +37,25 @@ enum NetworkError: Error, Equatable {
     }
 }
 
-/// Relay auth credentials, sent as X-Kypost-Subscriber-Id/X-Kypost-Subscriber-Hash
-/// headers on every request.
+/// Per-device auth credentials, sent as X-Kypost-Device-Id/X-Kypost-Device-Secret
+/// headers on every authenticated request. deviceSecret is minted server-side
+/// once per successful registration and returned only in that response — see
+/// DeviceRegistrationService.performPair.
 struct RelayAuth: Equatable, Sendable {
-    var sub: String
-    var hash: String
+    var deviceId: String
+    var deviceSecret: String
 
-    init(sub: String, hash: String) {
-        self.sub = sub
-        self.hash = hash
+    init(deviceId: String, deviceSecret: String) {
+        self.deviceId = deviceId
+        self.deviceSecret = deviceSecret
     }
 
     init(pairing: Pairing) {
-        self.init(sub: pairing.sub, hash: pairing.hash)
+        self.init(deviceId: pairing.lastDeviceId ?? "", deviceSecret: pairing.deviceSecret)
     }
 
     var headerFields: [String: String] {
-        ["X-Kypost-Subscriber-Id": sub, "X-Kypost-Subscriber-Hash": hash]
+        ["X-Kypost-Device-Id": deviceId, "X-Kypost-Device-Secret": deviceSecret]
     }
 }
 

@@ -4,7 +4,9 @@
 //
 //  Deep-link parsing and routing (spec §1, §10). Binding contract: the pairing
 //  scheme is exactly llamalabels://native-pair with required params
-//  sub, hash, srv, pt and optional reg.
+//  sub, srv, pt and optional reg. There is no credential in the link itself —
+//  the per-device pairing secret is issued only via the registration
+//  response, never carried in the deep link/QR.
 //
 
 import Foundation
@@ -12,7 +14,6 @@ import Foundation
 /// Parameters carried by a pairing deep link / QR code.
 struct PairingParams: Equatable, Sendable {
     var sub: String
-    var hash: String
     /// Relay server URL; becomes Pairing.srv, never edited by the user.
     var srv: String
     /// Pairing token.
@@ -27,10 +28,6 @@ struct PairingParams: Equatable, Sendable {
             return URL(string: reg)
         }
         return URL(string: srv)?.appending(path: "api/notifications/native/register")
-    }
-
-    var auth: RelayAuth {
-        RelayAuth(sub: sub, hash: hash)
     }
 }
 
@@ -64,7 +61,6 @@ enum PairingLinkParser {
 
         return PairingParams(
             sub: try required("sub"),
-            hash: try required("hash"),
             srv: try required("srv"),
             pt: try required("pt"),
             reg: query["reg"].flatMap { $0.isEmpty ? nil : $0 }

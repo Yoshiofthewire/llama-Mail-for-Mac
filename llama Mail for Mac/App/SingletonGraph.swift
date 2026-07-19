@@ -51,6 +51,7 @@ final class SingletonGraph {
     lazy var desktopRegistrationClient = DesktopRegistrationClient(httpClient: httpClient)
     lazy var pushNotificationClient = PushNotificationClient(httpClient: httpClient)
     lazy var mfaResponseClient = MfaResponseClient(httpClient: httpClient)
+    lazy var deregisterClient = DeregisterClient(httpClient: httpClient)
     lazy var contactSyncClient = ContactSyncClient(httpClient: httpClient)
     lazy var pgpQrClient = PgpQrClient(httpClient: httpClient)
 
@@ -94,6 +95,10 @@ final class SingletonGraph {
     )
     lazy var approveMfaChallengeUseCase = ApproveMfaChallengeUseCase(
         client: mfaResponseClient,
+        securePairingStore: securePairingStore
+    )
+    lazy var deregisterDeviceUseCase = DeregisterDeviceUseCase(
+        client: deregisterClient,
         securePairingStore: securePairingStore
     )
     lazy var deviceRegistrationService = DeviceRegistrationService(

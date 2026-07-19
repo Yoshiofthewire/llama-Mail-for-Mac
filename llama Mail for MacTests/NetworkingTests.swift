@@ -16,7 +16,7 @@ import Testing
 /// tests assert on the outgoing request.
 
 private let validPairingLink = URL(
-    string: "llamalabels://native-pair?sub=user1&hash=abc123&srv=https://relay.example.com&pt=token9"
+    string: "llamalabels://native-pair?sub=user1&srv=https://relay.example.com&pt=token9"
 )!
 
 // MARK: - Pairing link parsing
@@ -25,7 +25,6 @@ private let validPairingLink = URL(
     @Test func parsesValidLink() throws {
         let params = try PairingLinkParser.parse(validPairingLink)
         #expect(params.sub == "user1")
-        #expect(params.hash == "abc123")
         #expect(params.srv == "https://relay.example.com")
         #expect(params.pt == "token9")
         #expect(params.reg == nil)
@@ -37,9 +36,19 @@ private let validPairingLink = URL(
         #expect(params.reg == "https://reg.example.com/custom")
     }
 
-    @Test(arguments: ["sub", "hash", "srv", "pt"])
+    /// A stale cached QR image from before the per-device-secret migration
+    /// may still carry a hash= param; it must simply be ignored, not
+    /// rejected, since it's harmless and the pairingToken alone is what
+    /// actually gates registration.
+    @Test func ignoresLegacyHashParamIfPresent() throws {
+        let url = URL(string: validPairingLink.absoluteString + "&hash=stale-value")!
+        let params = try PairingLinkParser.parse(url)
+        #expect(params.sub == "user1")
+    }
+
+    @Test(arguments: ["sub", "srv", "pt"])
     func rejectsMissingRequiredParameter(missing: String) {
-        let all = ["sub": "u", "hash": "h", "srv": "https://s.example.com", "pt": "p"]
+        let all = ["sub": "u", "srv": "https://s.example.com", "pt": "p"]
         let query = all
             .filter { $0.key != missing }
             .map { "\($0.key)=\($0.value)" }
@@ -51,15 +60,15 @@ private let validPairingLink = URL(
     }
 
     @Test func rejectsEmptyRequiredParameter() {
-        let url = URL(string: "llamalabels://native-pair?sub=&hash=h&srv=https://s.example.com&pt=p")!
+        let url = URL(string: "llamalabels://native-pair?sub=&srv=https://s.example.com&pt=p")!
         #expect(throws: PairingLinkError.missingParameter("sub")) {
             try PairingLinkParser.parse(url)
         }
     }
 
     @Test func rejectsWrongSchemeOrHost() {
-        let wrongScheme = URL(string: "https://native-pair?sub=u&hash=h&srv=s&pt=p")!
-        let wrongHost = URL(string: "llamalabels://other-host?sub=u&hash=h&srv=s&pt=p")!
+        let wrongScheme = URL(string: "https://native-pair?sub=u&srv=s&pt=p")!
+        let wrongHost = URL(string: "llamalabels://other-host?sub=u&srv=s&pt=p")!
         #expect(throws: PairingLinkError.notAPairingLink) {
             try PairingLinkParser.parse(wrongScheme)
         }
@@ -81,7 +90,7 @@ private let validPairingLink = URL(
 
 @Suite struct EndpointResolutionTests {
     @Test func registrationEndpointDerivedFromSrv() {
-        let params = PairingParams(sub: "u", hash: "h", srv: "https://relay.example.com", pt: "p")
+        let params = PairingParams(sub: "u", srv: "https://relay.example.com", pt: "p")
         #expect(
             params.registrationEndpoint?.absoluteString
             == "https://relay.example.com/api/notifications/native/register"
@@ -90,7 +99,7 @@ private let validPairingLink = URL(
 
     @Test func regParameterOverridesDerivedEndpoint() {
         let params = PairingParams(
-            sub: "u", hash: "h", srv: "https://relay.example.com", pt: "p",
+            sub: "u", srv: "https://relay.example.com", pt: "p",
             reg: "https://custom.example.com/register"
         )
         #expect(params.registrationEndpoint?.absoluteString == "https://custom.example.com/register")
@@ -173,7 +182,7 @@ private let validPairingLink = URL(
         let client = stubClient(status: 200, json: json)
         let response = try await PushNotificationClient(httpClient: client).pull(
             endpoint: URL(string: "https://relay.example.com/api/notifications/native/pull")!,
-            auth: RelayAuth(sub: "u", hash: "h"),
+            auth: RelayAuth(deviceId: "u", deviceSecret: "h"),
             after: 6
         )
         #expect(response.cursor == 8)
@@ -191,14 +200,22 @@ private let validPairingLink = URL(
 // MARK: - Client outcome mapping
 
 @Suite struct NativeRegistrationClientTests {
-    private let params = PairingParams(sub: "u1", hash: "h1", srv: "https://relay.example.com", pt: "p1")
+    private let params = PairingParams(sub: "u1", srv: "https://relay.example.com", pt: "p1")
 
-    @Test func successCarriesResponseAndAuthQuery() async {
-        let client = stubClient(status: 200, json: #"{"ok": true, "deviceId": "d1"}"#) { request in
+    @Test func successCarriesResponseAndSendsNoAuthHeaders() async {
+        let client = stubClient(
+            status: 200,
+            json: #"{"ok": true, "deviceId": "d1", "deviceSecret": "s1"}"#
+        ) { request in
             let url = request.url!.absoluteString
             #expect(url == "https://relay.example.com/api/notifications/native/register")
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
+            // No header-based auth on this endpoint — the backend never
+            // reads one here, and a device has no deviceSecret yet at
+            // register time anyway.
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == nil)
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == nil)
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == nil)
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == nil)
             #expect(request.httpMethod == "POST")
             // Body fields are a binding contract with the live backend:
             // subscriberId, pairingToken, and deviceToken are required.
@@ -217,6 +234,7 @@ private let validPairingLink = URL(
             return
         }
         #expect(response.deviceId == "d1")
+        #expect(response.deviceSecret == "s1")
     }
 
     @Test func unauthorizedPromptsRescan() async {
@@ -233,7 +251,7 @@ private let validPairingLink = URL(
 }
 
 @Suite struct MfaResponseClientTests {
-    private let auth = RelayAuth(sub: "u", hash: "h")
+    private let auth = RelayAuth(deviceId: "dev-1", deviceSecret: "secret-1")
 
     @Test func successOn200() async {
         let client = stubClient(status: 200, json: #"{"ok": true}"#) { request in
@@ -241,19 +259,20 @@ private let validPairingLink = URL(
                 request.url!.absoluteString
                     .hasPrefix("https://relay.example.com/api/mfa/push/respond")
             )
-            // Contract: auth and device identity travel in the body, and the
-            // boolean field is "approve" (not "approved").
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == "dev-1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == "secret-1")
+            // Contract: device identity travels in the headers, not the
+            // body, and the boolean field is "approve" (not "approved").
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""challengeId":"c1""#))
-            #expect(body.contains(#""subscriberId":"u""#))
-            #expect(body.contains(#""subscriberHash":"h""#))
-            #expect(body.contains(#""deviceId":"dev-1""#))
+            #expect(!body.contains("subscriberId"))
+            #expect(!body.contains("subscriberHash"))
+            #expect(!body.contains("deviceId"))
             #expect(body.contains(#""approve":true"#))
         }
         let outcome = await MfaResponseClient(httpClient: client).respond(
             serverUrl: "https://relay.example.com",
             auth: auth,
-            deviceId: "dev-1",
             challengeId: "c1",
             approved: true
         )
@@ -265,7 +284,6 @@ private let validPairingLink = URL(
         let outcome = await MfaResponseClient(httpClient: stubClient(status: status)).respond(
             serverUrl: "https://relay.example.com",
             auth: auth,
-            deviceId: "dev-1",
             challengeId: "c1",
             approved: false
         )
@@ -279,7 +297,6 @@ private let validPairingLink = URL(
         let outcome = await MfaResponseClient(httpClient: client).respond(
             serverUrl: "https://relay.example.com",
             auth: auth,
-            deviceId: "dev-1",
             challengeId: "c1",
             approved: true
         )
@@ -301,13 +318,13 @@ private let validPairingLink = URL(
             #expect(url.contains("since=123"))
             #expect(!url.contains("sub="))
             #expect(!url.contains("hash="))
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u")
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == "u")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == "h")
             #expect(request.httpMethod == "GET")
         }
         let response = try await ContactSyncClient(httpClient: client).pull(
             serverUrl: "https://relay.example.com",
-            auth: RelayAuth(sub: "u", hash: "h"),
+            auth: RelayAuth(deviceId: "u", deviceSecret: "h"),
             since: 123
         )
         #expect(response.cursor == 456)
@@ -319,8 +336,8 @@ private let validPairingLink = URL(
         let client = stubClient(status: 200, json: #"{"cursor": 7}"#) { request in
             #expect(request.httpMethod == "POST")
             #expect(request.url?.absoluteString == "https://relay.example.com/api/contacts/sync")
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u")
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == "u")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == "h")
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""baseCursor":123"#))
             #expect(body.contains(#""fn":"Ada""#))
@@ -328,7 +345,7 @@ private let validPairingLink = URL(
         }
         let response = try await ContactSyncClient(httpClient: client).push(
             serverUrl: "https://relay.example.com",
-            auth: RelayAuth(sub: "u", hash: "h"),
+            auth: RelayAuth(deviceId: "u", deviceSecret: "h"),
             baseCursor: 123,
             changes: [ContactDTO(
                 uid: "",
@@ -349,27 +366,66 @@ private let validPairingLink = URL(
                 request.url?.absoluteString
                     == "https://relay.example.com/api/contacts/c-1/photo"
             )
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u")
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == "u")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == "h")
         }
         let data = try await ContactSyncClient(httpClient: client).fetchPhoto(
             serverUrl: "https://relay.example.com",
-            auth: RelayAuth(sub: "u", hash: "h"),
+            auth: RelayAuth(deviceId: "u", deviceSecret: "h"),
             uid: "c-1"
         )
         #expect(String(decoding: data, as: UTF8.self) == "photo-bytes")
     }
 }
 
+@Suite struct DeregisterClientTests {
+    private let auth = RelayAuth(deviceId: "device-1", deviceSecret: "secret-1")
+
+    @Test func success200SendsDeviceHeadersAndEmptyBody() async {
+        let client = stubClient(status: 200, json: #"{"ok": true}"#) { request in
+            #expect(
+                request.url!.absoluteString
+                    == "https://relay.example.com/api/notifications/native/deregister"
+            )
+            #expect(request.httpMethod == "POST")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == "device-1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == "secret-1")
+            let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
+            #expect(body == "{}")
+        }
+        let outcome = await DeregisterClient(httpClient: client)
+            .deregister(serverUrl: "https://relay.example.com", auth: auth)
+        #expect(outcome == .success)
+    }
+
+    @Test func unauthorizedFrom401() async {
+        let outcome = await DeregisterClient(httpClient: stubClient(status: 401))
+            .deregister(serverUrl: "https://relay.example.com", auth: auth)
+        #expect(outcome == .unauthorized)
+    }
+
+    @Test func transportErrorIsFailure() async {
+        let client = HTTPClient { _ in
+            throw URLError(.notConnectedToInternet)
+        }
+        let outcome = await DeregisterClient(httpClient: client)
+            .deregister(serverUrl: "https://relay.example.com", auth: auth)
+        guard case .failure = outcome else {
+            Issue.record("Expected failure, got \(outcome)")
+            return
+        }
+    }
+}
+
 @Suite struct RelayAuthTests {
-    @Test func headerFieldsReturnsSubscriberIdAndHashAsNamedHeaders() {
-        let auth = RelayAuth(sub: "sub-1", hash: "hash-1")
+    @Test func headerFieldsReturnsDeviceIdAndSecretAsNamedHeaders() {
+        let auth = RelayAuth(deviceId: "device-1", deviceSecret: "secret-1")
 
         let fields = auth.headerFields
 
         #expect(fields == [
-            "X-Kypost-Subscriber-Id": "sub-1",
-            "X-Kypost-Subscriber-Hash": "hash-1",
+            "X-Kypost-Device-Id": "device-1",
+            "X-Kypost-Device-Secret": "secret-1",
         ])
     }
 }

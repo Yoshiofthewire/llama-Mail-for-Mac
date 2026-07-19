@@ -22,6 +22,7 @@ struct MacPreferencesView: View {
         contactsSettingsStore: SingletonGraph.shared.contactsSettingsStore,
         systemContactsExporter: SingletonGraph.shared.systemContactsExporter,
         deviceRegistrationService: SingletonGraph.shared.deviceRegistrationService,
+        deregisterDeviceUseCase: SingletonGraph.shared.deregisterDeviceUseCase,
         pushNotificationDispatcher: SingletonGraph.shared.pushNotificationDispatcher
     )
 
@@ -58,6 +59,7 @@ struct MacPreferencesView: View {
 private struct ConnectionPane: View {
     @Bindable var viewModel: SettingsViewModel
     @State private var showPairingSheet = false
+    @State private var showUnpairConfirmation = false
 
     var body: some View {
         Form {
@@ -94,7 +96,7 @@ private struct ConnectionPane: View {
                         Button("Re-pair…") { showPairingSheet = true }
                         Spacer()
                         Button("Remove Pairing", role: .destructive) {
-                            viewModel.unpair()
+                            showUnpairConfirmation = true
                         }
                     } else {
                         Button("Pair This Mac…") { showPairingSheet = true }
@@ -147,6 +149,18 @@ private struct ConnectionPane: View {
         .formStyle(.grouped)
         .sheet(isPresented: $showPairingSheet) {
             DesktopPairingView(initialParams: nil)
+        }
+        .confirmationDialog(
+            "Unpair this device?",
+            isPresented: $showUnpairConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Unpair", role: .destructive) {
+                Task { await viewModel.unpair() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the device from your account's paired devices on the server and clears its local pairing. You'll need to scan a new QR code or pass a new link to pair again.")
         }
     }
 }

@@ -21,6 +21,11 @@ struct RegistrationResponse: Decodable, Equatable, Sendable {
     var ok: Bool
     var synced: Bool?
     var deviceId: String?
+    /// The raw per-device pairing secret, minted fresh on every successful
+    /// registration and returned only in this response — never retrievable
+    /// again afterward. Callers must persist it unconditionally, overwriting
+    /// any prior value (see DeviceRegistrationService.performPair).
+    var deviceSecret: String?
     var deliveryMode: DeliveryMode?
     /// Optional; derived as {srv}/api/notifications/native/pull if absent (spec §3).
     var pullEndpoint: String?
@@ -89,10 +94,13 @@ final class NativeRegistrationClient: Sendable {
         let deviceName = await MainActor.run { UIDevice.current.name }
 #endif
         do {
+            // No header-based auth on this endpoint — the backend has never
+            // read one here, only the pairingToken in the body below, and a
+            // device has no deviceSecret yet at register time anyway (that's
+            // the whole point of this call).
             let response = try await httpClient.post(
                 RegistrationResponse.self,
                 url: endpoint,
-                headers: params.auth.headerFields,
                 jsonBody: RegisterRequest(
                     subscriberId: params.sub,
                     pairingToken: params.pt,

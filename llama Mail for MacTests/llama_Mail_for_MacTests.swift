@@ -103,7 +103,7 @@ private func makeEmail(
 
         let pairing = Pairing(
             sub: "user-sub",
-            hash: "auth-hash",
+            deviceSecret: "auth-hash",
             srv: "https://relay.example.com",
             registrationUrl: nil,
             pairingToken: "pt-token",

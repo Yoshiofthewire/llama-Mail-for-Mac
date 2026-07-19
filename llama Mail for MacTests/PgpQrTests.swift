@@ -40,15 +40,15 @@ private let keyJSON = #"""
 
         _ = try await client.fetchToken(
             serverUrl: "https://mail.example.com",
-            auth: RelayAuth(sub: "u1", hash: "h1")
+            auth: RelayAuth(deviceId: "u1", deviceSecret: "h1")
         )
 
         let request = try #require(capture.value)
         // Pairing auth now travels as headers, not query params (server prefers
         // headers; the app has no web session cookie either way).
         #expect(request.url?.absoluteString == "https://mail.example.com/api/pgp/qr/token")
-        #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
-        #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
+        #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == "u1")
+        #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == "h1")
         #expect(request.httpMethod == "GET")
     }
 
@@ -56,7 +56,7 @@ private let keyJSON = #"""
         let client = PgpQrClient(httpClient: stubClient(json: tokenJSON))
         let response = try await client.fetchToken(
             serverUrl: "https://mail.example.com",
-            auth: RelayAuth(sub: "u1", hash: "h1")
+            auth: RelayAuth(deviceId: "u1", deviceSecret: "h1")
         )
 
         #expect(response.token == "tok-abc")

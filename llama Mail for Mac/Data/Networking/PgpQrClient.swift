@@ -61,7 +61,7 @@ final class PgpQrClient: Sendable {
     /// this account's own key.
     ///
     /// Takes relay pairing auth (backend withMailAuth), the same credentials
-    /// contact sync uses — the backend accepts X-Kypost-Subscriber-Id/X-Kypost-Subscriber-Hash
+    /// contact sync uses — the backend accepts X-Kypost-Device-Id/X-Kypost-Device-Secret
     /// headers precisely because paired native clients have no web session cookie.
     ///
     /// Errors: 401 credentials rejected, 400 no PGP identity on the account,

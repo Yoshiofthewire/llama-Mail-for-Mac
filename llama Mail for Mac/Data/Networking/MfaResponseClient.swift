@@ -5,9 +5,9 @@
 //  Sends MFA approve/deny responses (spec §5).
 //  POST {srv}/api/mfa/push/respond
 //  Binding contract (backend handlePushRespond in push_mfa_handlers.go):
-//  auth goes in the JSON body, not query params — challengeId, subscriberId,
-//  subscriberHash, and deviceId are all required (400 if missing), and the
-//  boolean is named "approve".
+//  the device authenticates via X-Kypost-Device-Id/X-Kypost-Device-Secret
+//  headers (RelayAuth), same as every other authenticated Relay endpoint;
+//  the body carries only challengeId and approve.
 //
 
 import Foundation
@@ -25,9 +25,6 @@ enum MfaResponseOutcome: Equatable, Sendable {
 final class MfaResponseClient: Sendable {
     private struct RespondRequest: Encodable {
         var challengeId: String
-        var subscriberId: String
-        var subscriberHash: String
-        var deviceId: String
         var approve: Bool
     }
 
@@ -44,7 +41,6 @@ final class MfaResponseClient: Sendable {
     func respond(
         serverUrl: String,
         auth: RelayAuth,
-        deviceId: String,
         challengeId: String,
         approved: Bool
     ) async -> MfaResponseOutcome {
@@ -55,13 +51,8 @@ final class MfaResponseClient: Sendable {
             _ = try await httpClient.post(
                 RespondResponse.self,
                 url: endpoint,
-                jsonBody: RespondRequest(
-                    challengeId: challengeId,
-                    subscriberId: auth.sub,
-                    subscriberHash: auth.hash,
-                    deviceId: deviceId,
-                    approve: approved
-                )
+                headers: auth.headerFields,
+                jsonBody: RespondRequest(challengeId: challengeId, approve: approved)
             )
             return .success
         } catch NetworkError.unauthorized, NetworkError.conflict {

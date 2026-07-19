@@ -25,6 +25,7 @@ final class SettingsViewModel {
     private let contactsSettingsStore: ContactsSettingsStore
     private let systemContactsExporter: SystemContactsExporter
     private let deviceRegistrationService: DeviceRegistrationService
+    private let deregisterDeviceUseCase: DeregisterDeviceUseCase
     private let pushNotificationDispatcher: PushNotificationDispatcher
 
     var systemNotificationsEnabled: Bool {
@@ -57,6 +58,7 @@ final class SettingsViewModel {
         contactsSettingsStore: ContactsSettingsStore,
         systemContactsExporter: SystemContactsExporter,
         deviceRegistrationService: DeviceRegistrationService,
+        deregisterDeviceUseCase: DeregisterDeviceUseCase,
         pushNotificationDispatcher: PushNotificationDispatcher
     ) {
         self.securePairingStore = securePairingStore
@@ -67,6 +69,7 @@ final class SettingsViewModel {
         self.contactsSettingsStore = contactsSettingsStore
         self.systemContactsExporter = systemContactsExporter
         self.deviceRegistrationService = deviceRegistrationService
+        self.deregisterDeviceUseCase = deregisterDeviceUseCase
         self.pushNotificationDispatcher = pushNotificationDispatcher
         systemNotificationsEnabled = pushSettingsStore.systemNotificationsEnabled
         exportContactsToSystem = contactsSettingsStore.exportToSystemContactsEnabled
@@ -89,7 +92,8 @@ final class SettingsViewModel {
         pushSettingsStore.deliveryMode?.rawValue.capitalized ?? "Push"
     }
 
-    func unpair() {
+    func unpair() async {
+        _ = await deregisterDeviceUseCase()
         try? securePairingStore.clear()
         statusMessage = "Pairing removed"
     }

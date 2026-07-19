@@ -21,9 +21,9 @@ private func scratchStores() -> (defaults: UserDefaults, keychain: KeychainStora
     )
 }
 
-private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
+private func makePairing(lastDeviceId: String? = "dev-1", deviceSecret: String = "s1") -> Pairing {
     Pairing(
-        sub: "u1", hash: "h1", srv: server, registrationUrl: nil,
+        sub: "u1", deviceSecret: deviceSecret, srv: server, registrationUrl: nil,
         pairingToken: "pt", lastDeviceId: lastDeviceId, pairedAt: Date()
     )
 }
@@ -144,8 +144,8 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
             #expect(url.contains("after=3"))
             #expect(!url.contains("sub="))
             #expect(!url.contains("hash="))
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") != nil)
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == "dev-1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") != nil)
         }
         let env = try makeEnvironment(client: client)
         env.cursorStore.advance(to: 3)
@@ -198,10 +198,10 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
         return Environment(service: service, pairingStore: pairingStore, settings: settings)
     }
 
-    private let params = PairingParams(sub: "u1", hash: "h1", srv: server, pt: "pt-1")
+    private let params = PairingParams(sub: "u1", srv: server, pt: "pt-1")
 
     @Test func successfulPairingPersistsEverything() async throws {
-        let json = #"{"ok": true, "deviceId": "dev-7", "deliveryMode": "pull"}"#
+        let json = #"{"ok": true, "deviceId": "dev-7", "deviceSecret": "s-7", "deliveryMode": "pull"}"#
         let env = try makeEnvironment(client: stubClient(json: json))
 
         let outcome = await env.service.pair(params: params, deviceToken: "apns-token")
@@ -213,6 +213,7 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
         let pairing = try #require(try env.pairingStore.loadPairing())
         #expect(pairing.sub == "u1")
         #expect(pairing.lastDeviceId == "dev-7")
+        #expect(pairing.deviceSecret == "s-7")
         #expect(env.settings.deliveryMode == .pull)
         // pullEndpoint absent in response → derived from srv (spec §3).
         #expect(env.settings.pullEndpoint == "\(server)/api/notifications/native/pull")
@@ -232,13 +233,29 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
                 request.url!.absoluteString
                     == "\(server)/api/notifications/native/register"
             )
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
-            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
+            // Register sends no header-based auth at all, initial or
+            // re-registration alike — see NativeRegistrationClient.register.
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == nil)
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == nil)
         }
         let env = try makeEnvironment(client: client, paired: true)
         let outcome = await env.service.reregisterIfPaired(deviceToken: "t2")
         #expect(outcome != nil)
         #expect(try env.pairingStore.loadPairing()?.lastDeviceId == "dev-8")
+    }
+
+    /// Every successful register mints a brand-new secret, invalidating the
+    /// previous one — the stored value must be overwritten, not kept.
+    @Test func reregisterOverwritesStoredDeviceSecret() async throws {
+        let client = stubClient(json: #"{"ok": true, "deviceId": "dev-8", "deviceSecret": "new-secret"}"#)
+        let env = try makeEnvironment(client: client, paired: true)
+        let before = try #require(try env.pairingStore.loadPairing())
+        #expect(before.deviceSecret == "s1")
+
+        let outcome = await env.service.reregisterIfPaired(deviceToken: "t2")
+
+        #expect(outcome != nil)
+        #expect(try env.pairingStore.loadPairing()?.deviceSecret == "new-secret")
     }
 
     @Test func reregisterWithoutPairingIsNoOp() async throws {
@@ -278,7 +295,7 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
 
 @MainActor
 @Suite struct DeviceRegistrationServiceDedupeTests {
-    private let params = PairingParams(sub: "u1", hash: "h1", srv: server, pt: "pt-1")
+    private let params = PairingParams(sub: "u1", srv: server, pt: "pt-1")
 
     private func makeService(counter: Box<Int>) -> DeviceRegistrationService {
         let client = HTTPClient { request in
@@ -341,11 +358,13 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
     @Test func approvesThroughPairedServer() async throws {
         let client = stubClient(json: #"{"ok": true}"#) { request in
             #expect(request.url!.absoluteString.hasPrefix("\(server)/api/mfa/push/respond"))
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == "dev-1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == "s1")
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""challengeId":"c-1""#))
-            #expect(body.contains(#""subscriberId":"u1""#))
-            #expect(body.contains(#""subscriberHash":"h1""#))
-            #expect(body.contains(#""deviceId":"dev-1""#))
+            #expect(!body.contains("subscriberId"))
+            #expect(!body.contains("subscriberHash"))
+            #expect(!body.contains("deviceId"))
             #expect(body.contains(#""approve":true"#))
         }
         let useCase = try makeUseCase(client: client, paired: true)
@@ -372,5 +391,67 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
             Issue.record("Expected failure without a device ID, got \(outcome)")
             return
         }
+    }
+
+    @Test func failsWithoutDeviceSecret() async throws {
+        let (_, keychain) = scratchStores()
+        let pairingStore = SecurePairingStore(keychain: keychain)
+        try pairingStore.savePairing(makePairing(deviceSecret: ""))
+        let useCase = ApproveMfaChallengeUseCase(
+            client: MfaResponseClient(httpClient: stubClient()),
+            securePairingStore: pairingStore
+        )
+        let outcome = await useCase(challengeId: "c-1", approved: true)
+        guard case .failure = outcome else {
+            Issue.record("Expected failure without a device secret, got \(outcome)")
+            return
+        }
+    }
+}
+
+@Suite struct DeregisterDeviceUseCaseTests {
+    private func makeUseCase(client: HTTPClient, pairing: Pairing?) throws -> DeregisterDeviceUseCase {
+        let (_, keychain) = scratchStores()
+        let pairingStore = SecurePairingStore(keychain: keychain)
+        if let pairing {
+            try pairingStore.savePairing(pairing)
+        }
+        return DeregisterDeviceUseCase(
+            client: DeregisterClient(httpClient: client),
+            securePairingStore: pairingStore
+        )
+    }
+
+    @Test func succeedsThroughPairedServer() async throws {
+        let client = stubClient(json: #"{"ok": true}"#) { request in
+            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/notifications/native/deregister"))
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Id") == "dev-1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Device-Secret") == "s1")
+        }
+        let useCase = try makeUseCase(client: client, pairing: makePairing())
+        let outcome = await useCase()
+        #expect(outcome == .success)
+    }
+
+    @Test func failsWhenUnpaired() async throws {
+        let useCase = try makeUseCase(client: stubClient(), pairing: nil)
+        let outcome = await useCase()
+        #expect(outcome == .failure("Device is not registered"))
+    }
+
+    @Test func skipsNetworkCallForPreMigrationPairingWithNoSecret() async throws {
+        let requestFired = Box(false)
+        let client = stubClient { _ in requestFired.value = true }
+        let useCase = try makeUseCase(client: client, pairing: makePairing(deviceSecret: ""))
+        let outcome = await useCase()
+        #expect(!requestFired.value)
+        #expect(outcome == .failure("Device is not registered"))
+    }
+
+    @Test func unauthorizedFrom401() async throws {
+        let client = stubClient(status: 401)
+        let useCase = try makeUseCase(client: client, pairing: makePairing())
+        let outcome = await useCase()
+        #expect(outcome == .unauthorized)
     }
 }

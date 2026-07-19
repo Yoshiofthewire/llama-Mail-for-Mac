@@ -14,7 +14,6 @@ extension PairingParams {
     init(pairing: Pairing) {
         self.init(
             sub: pairing.sub,
-            hash: pairing.hash,
             srv: pairing.srv,
             pt: pairing.pairingToken,
             reg: pairing.registrationUrl
@@ -81,7 +80,11 @@ final class DeviceRegistrationService {
             do {
                 try securePairingStore.savePairing(Pairing(
                     sub: params.sub,
-                    hash: params.hash,
+                    // Every successful register mints a brand-new secret
+                    // server-side, invalidating whatever was stored before —
+                    // persist unconditionally, never fall back to the
+                    // previous value.
+                    deviceSecret: response.deviceSecret ?? "",
                     srv: params.srv,
                     registrationUrl: params.reg,
                     pairingToken: params.pt,
