@@ -3,7 +3,7 @@
 //  llama Mail
 //
 //  URLSession wrapper (spec Phase 2, OkHttp equivalent). Centralizes the
-//  sub/hash query-param auth and HTTP status → error mapping so every client
+//  pairing-auth headers and HTTP status → error mapping so every client
 //  shares one failure model (Ponytail principle #4).
 //
 
