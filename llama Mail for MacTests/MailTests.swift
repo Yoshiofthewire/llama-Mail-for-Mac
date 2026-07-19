@@ -91,8 +91,10 @@ private func makeOutgoing(
         let client = stubClient(json: json) { request in
             let url = request.url!.absoluteString
             #expect(url.hasPrefix("\(server)/api/inbox?"))
-            #expect(url.contains("sub=u1"))
-            #expect(url.contains("hash=h1"))
+            #expect(!url.contains("sub="))
+            #expect(!url.contains("hash="))
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
             #expect(url.contains("mailbox=INBOX"))
             #expect(url.contains("limit=50"))
             #expect(url.contains("since=0"))
@@ -153,8 +155,10 @@ private func makeOutgoing(
         let json = #"{"parent": "", "folders": [{"path": "INBOX"}, {"path": "Archive", "deletable": true}]}"#
         let foldersClient = stubClient(json: json) { request in
             let url = request.url!.absoluteString
-            #expect(url.hasPrefix("\(server)/api/inbox/folders?"))
+            #expect(url == "\(server)/api/inbox/folders")
             #expect(!url.contains("parent="))
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
         }
         let folders = try await RelayMailSource(httpClient: foldersClient, serverUrl: server, auth: auth)
             .listFolders()
@@ -164,6 +168,7 @@ private func makeOutgoing(
         let subJson = #"{"parent": "Archive", "folders": [{"path": "Archive/Receipts", "deletable": true}]}"#
         let subClient = stubClient(json: subJson) { request in
             #expect(request.url!.absoluteString.contains("parent=Archive"))
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
         }
         let subs = try await RelayMailSource(httpClient: subClient, serverUrl: server, auth: auth)
             .listFolders(parent: "Archive")
@@ -178,7 +183,9 @@ private func makeOutgoing(
 
     @Test func movePostsBulkActionBody() async throws {
         let client = stubClient(json: #"{"ok": true}"#) { request in
-            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/inbox/actions?"))
+            #expect(request.url!.absoluteString == "\(server)/api/inbox/actions")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
             #expect(request.httpMethod == "POST")
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""action":"move""#))
@@ -192,7 +199,9 @@ private func makeOutgoing(
 
     @Test func deletePostsBulkActionBodyWithoutTarget() async throws {
         let client = stubClient(json: #"{"ok": true}"#) { request in
-            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/inbox/actions?"))
+            #expect(request.url!.absoluteString == "\(server)/api/inbox/actions")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
             #expect(request.httpMethod == "POST")
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""action":"delete""#))
@@ -215,7 +224,9 @@ private func makeOutgoing(
         call: @Sendable (RelayMailSource) async throws -> Void
     ) async throws {
         let client = stubClient(json: #"{"ok": true}"#) { request in
-            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/inbox/actions?"))
+            #expect(request.url!.absoluteString == "\(server)/api/inbox/actions")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
             #expect(request.httpMethod == "POST")
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""action":"\#(verb)""#))
@@ -229,7 +240,9 @@ private func makeOutgoing(
 
     @Test func sendPostsCommaStringBody() async throws {
         let client = stubClient(json: #"{"ok": true, "sentSaved": true}"#) { request in
-            #expect(request.url!.absoluteString.hasPrefix("\(server)/api/mail/send?"))
+            #expect(request.url!.absoluteString == "\(server)/api/mail/send")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
             #expect(request.httpMethod == "POST")
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""to":"a@x.com, b@x.com""#))
@@ -267,6 +280,8 @@ private func makeOutgoing(
             #expect(url.hasPrefix("\(server)/api/mail/attachments?"))
             #expect(url.contains("mailbox=INBOX"))
             #expect(url.contains("messageId=42"))
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
         }
         let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
         let attachments = try await source.listAttachments(folder: "INBOX", messageId: "42")
@@ -287,6 +302,8 @@ private func makeOutgoing(
             #expect(url.hasPrefix("\(server)/api/mail/attachment?"))
             #expect(url.contains("messageId=42"))
             #expect(url.contains("index=1"))
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
         }
         let source = RelayMailSource(httpClient: client, serverUrl: server, auth: auth)
         let data = try await source.downloadAttachment(folder: "INBOX", messageId: "42", index: 1)

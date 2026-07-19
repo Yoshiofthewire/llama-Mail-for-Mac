@@ -4,10 +4,12 @@
 //
 //  MailSource backed by the relay endpoints, matching the Android reference
 //  RelayMailSource.kt / RelayModels.kt (Mobile_Mail_Relay.md) and verified
-//  against the live backend 2026-07-10:
-//    GET  /api/inbox?sub&hash&limit&mailbox&since
-//    GET  /api/inbox/folders?sub&hash
-//    POST /api/mail/send?sub&hash
+//  against the live backend 2026-07-10. Pairing auth (subscriberId/
+//  subscriberHash) travels as headers (RelayAuth.headerFields), not query
+//  params:
+//    GET  /api/inbox?limit&mailbox&since
+//    GET  /api/inbox/folders
+//    POST /api/mail/send
 //  Binding contract: send body uses comma-joined recipient strings plus a
 //  "mode" field; /api/inbox returns emails grouped by tab.
 //
@@ -228,14 +230,15 @@ final class RelayMailSource: MailSource {
     }
 
     func listFolders(parent: String?) async throws -> [MailFolder] {
-        var query = auth.queryItems
+        var query: [URLQueryItem] = []
         if let parent, !parent.isEmpty {
             query.append(URLQueryItem(name: "parent", value: parent))
         }
         let response = try await httpClient.get(
             RelayFolderListResponse.self,
             url: try endpoint("api/inbox/folders"),
-            query: query
+            query: query,
+            headers: auth.headerFields
         )
         return (response.folders ?? []).map { MailFolder(name: $0.path) }
     }
@@ -247,11 +250,12 @@ final class RelayMailSource: MailSource {
         let response = try await httpClient.get(
             RelayInboxResponse.self,
             url: try endpoint("api/inbox"),
-            query: auth.queryItems + [
+            query: [
                 URLQueryItem(name: "limit", value: String(max(to, 1))),
                 URLQueryItem(name: "mailbox", value: folder),
                 URLQueryItem(name: "since", value: "0"),
-            ]
+            ],
+            headers: auth.headerFields
         )
         return response.allEmails(folder: folder)
     }
@@ -299,7 +303,7 @@ final class RelayMailSource: MailSource {
         _ = try await httpClient.post(
             RelayActionResponse.self,
             url: try endpoint("api/inbox/actions"),
-            query: auth.queryItems,
+            headers: auth.headerFields,
             jsonBody: RelayActionRequest(
                 action: action,
                 messageIds: messageIds,
@@ -313,10 +317,11 @@ final class RelayMailSource: MailSource {
         let response = try await httpClient.get(
             RelayAttachmentListResponse.self,
             url: try endpoint("api/mail/attachments"),
-            query: auth.queryItems + [
+            query: [
                 URLQueryItem(name: "mailbox", value: folder),
                 URLQueryItem(name: "messageId", value: messageId),
-            ]
+            ],
+            headers: auth.headerFields
         )
         return (response.attachments ?? []).map { $0.toDomain() }
     }
@@ -324,11 +329,12 @@ final class RelayMailSource: MailSource {
     func downloadAttachment(folder: String, messageId: String, index: Int) async throws -> Data {
         try await httpClient.getData(
             url: try endpoint("api/mail/attachment"),
-            query: auth.queryItems + [
+            query: [
                 URLQueryItem(name: "mailbox", value: folder),
                 URLQueryItem(name: "messageId", value: messageId),
                 URLQueryItem(name: "index", value: String(index)),
-            ]
+            ],
+            headers: auth.headerFields
         )
     }
 
@@ -336,7 +342,7 @@ final class RelayMailSource: MailSource {
         _ = try await httpClient.post(
             RelaySendResponse.self,
             url: try endpoint("api/mail/send"),
-            query: auth.queryItems,
+            headers: auth.headerFields,
             jsonBody: RelaySendRequest(from: email)
         )
     }
