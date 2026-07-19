@@ -196,9 +196,9 @@ private let validPairingLink = URL(
     @Test func successCarriesResponseAndAuthQuery() async {
         let client = stubClient(status: 200, json: #"{"ok": true, "deviceId": "d1"}"#) { request in
             let url = request.url!.absoluteString
-            #expect(url.hasPrefix("https://relay.example.com/api/notifications/native/register"))
-            #expect(url.contains("sub=u1"))
-            #expect(url.contains("hash=h1"))
+            #expect(url == "https://relay.example.com/api/notifications/native/register")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
             #expect(request.httpMethod == "POST")
             // Body fields are a binding contract with the live backend:
             // subscriberId, pairingToken, and deviceToken are required.

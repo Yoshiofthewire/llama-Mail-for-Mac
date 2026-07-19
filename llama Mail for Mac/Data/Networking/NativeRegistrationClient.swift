@@ -92,7 +92,7 @@ final class NativeRegistrationClient: Sendable {
             let response = try await httpClient.post(
                 RegistrationResponse.self,
                 url: endpoint,
-                query: params.auth.queryItems,
+                headers: params.auth.headerFields,
                 jsonBody: RegisterRequest(
                     subscriberId: params.sub,
                     pairingToken: params.pt,

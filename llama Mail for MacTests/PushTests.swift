@@ -227,8 +227,10 @@ private func makePairing(lastDeviceId: String? = "dev-1") -> Pairing {
         let client = stubClient(json: #"{"ok": true, "deviceId": "dev-8"}"#) { request in
             #expect(
                 request.url!.absoluteString
-                    .hasPrefix("\(server)/api/notifications/native/register?")
+                    == "\(server)/api/notifications/native/register"
             )
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
         }
         let env = try makeEnvironment(client: client, paired: true)
         let outcome = await env.service.reregisterIfPaired(deviceToken: "t2")
