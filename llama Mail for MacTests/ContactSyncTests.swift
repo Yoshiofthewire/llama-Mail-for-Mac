@@ -260,8 +260,7 @@ private func makeDTO(
         """
         let client = stubClient(json: json) { request in
             #expect(
-                request.url!.absoluteString
-                    .hasPrefix("https://relay.example.com/api/contacts/sync?")
+                request.url!.absoluteString == "https://relay.example.com/api/contacts/sync"
             )
             // Queued local changes go out as a push (POST {baseCursor, changes});
             // creates carry an empty uid (Android contract).
@@ -709,10 +708,9 @@ private func makeDTO(
     @Test func dedupeSendsEmptyJSONBodyToTheDedupeEndpoint() async throws {
         let client = stubClient(json: #"{"mergedCount": 0, "groups": []}"#) { request in
             #expect(request.httpMethod == "POST")
-            let url = request.url!.absoluteString
-            #expect(url.hasPrefix("https://relay.example.com/api/contacts/dedupe?"))
-            #expect(url.contains("sub=u1"))
-            #expect(url.contains("hash=h1"))
+            #expect(request.url?.absoluteString == "https://relay.example.com/api/contacts/dedupe")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u1")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h1")
             // The backend never reads the body, but does expect valid JSON.
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body == "{}")

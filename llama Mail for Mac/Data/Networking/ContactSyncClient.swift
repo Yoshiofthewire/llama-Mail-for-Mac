@@ -5,8 +5,8 @@
 //  Contact sync, matching the Android reference ContactSyncClient.kt /
 //  ContactSyncModels.kt (Mobile_Contact_Sync.md) and verified against the
 //  live backend 2026-07-10:
-//    Pull: GET  {srv}/api/contacts/sync?sub&hash&since=N
-//    Push: POST {srv}/api/contacts/sync?sub&hash  body {baseCursor, changes}
+//    Pull: GET  {srv}/api/contacts/sync?since=N  (pairing auth via headers)
+//    Push: POST {srv}/api/contacts/sync  body {baseCursor, changes}  (pairing auth via headers)
 //  Both return {cursor, tooOld, changed: [...], deleted: [...]}.
 //
 //  DTO field names mirror the backend contactPayload
@@ -141,9 +141,8 @@ final class ContactSyncClient: Sendable {
         try await httpClient.get(
             ContactSyncPullResponse.self,
             url: try endpoint(serverUrl),
-            query: auth.queryItems + [
-                URLQueryItem(name: "since", value: String(max(since, 0)))
-            ]
+            query: [URLQueryItem(name: "since", value: String(max(since, 0)))],
+            headers: auth.headerFields
         )
     }
 
@@ -158,14 +157,15 @@ final class ContactSyncClient: Sendable {
         try await httpClient.post(
             ContactSyncPullResponse.self,
             url: try endpoint(serverUrl),
-            query: auth.queryItems,
+            headers: auth.headerFields,
             jsonBody: ContactSyncPushRequest(baseCursor: baseCursor, changes: changes)
         )
     }
 
-    /// POST {srv}/api/contacts/dedupe?sub&hash — asks the server to merge
+    /// POST {srv}/api/contacts/dedupe — asks the server to merge
     /// duplicate contacts and report what it merged. The merges land in the
-    /// sync delta, so callers sync afterwards to pick them up.
+    /// sync delta, so callers sync afterwards to pick them up. Pairing auth
+    /// (sub/hash) is sent as headers.
     ///
     /// Takes pairing auth (backend withMailAuth), same as sync: 401 means the
     /// credentials were rejected, 503 that mail pairing isn't configured.
@@ -179,15 +179,16 @@ final class ContactSyncClient: Sendable {
         return try await httpClient.post(
             ContactDedupeReport.self,
             url: base.appending(path: "api/contacts/dedupe"),
-            query: auth.queryItems,
+            headers: auth.headerFields,
             jsonBody: EmptyJSONBody()
         )
     }
 
-    /// GET {srv}/api/contacts/{uid}/photo?sub&hash — raw image bytes for a
-    /// contact's photoRef. The backend currently gates this behind a web
-    /// session (llama-labels Part 0 gap), so callers treat
-    /// NetworkError.unauthorized as "not available yet", not a pairing failure.
+    /// GET {srv}/api/contacts/{uid}/photo — raw image bytes for a
+    /// contact's photoRef. Pairing auth (sub/hash) is sent as headers. The
+    /// backend currently gates this behind a web session (llama-labels
+    /// Part 0 gap), so callers treat NetworkError.unauthorized as "not
+    /// available yet", not a pairing failure.
     func fetchPhoto(
         serverUrl: String,
         auth: RelayAuth,
@@ -198,7 +199,7 @@ final class ContactSyncClient: Sendable {
         }
         return try await httpClient.getData(
             url: base.appending(path: "api/contacts/\(uid)/photo"),
-            query: auth.queryItems
+            headers: auth.headerFields
         )
     }
 

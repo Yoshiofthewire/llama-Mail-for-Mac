@@ -299,6 +299,10 @@ private let validPairingLink = URL(
             let url = request.url!.absoluteString
             #expect(url.hasPrefix("https://relay.example.com/api/contacts/sync"))
             #expect(url.contains("since=123"))
+            #expect(!url.contains("sub="))
+            #expect(!url.contains("hash="))
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h")
             #expect(request.httpMethod == "GET")
         }
         let response = try await ContactSyncClient(httpClient: client).pull(
@@ -314,6 +318,9 @@ private let validPairingLink = URL(
     @Test func pushSendsBaseCursorAndChanges() async throws {
         let client = stubClient(status: 200, json: #"{"cursor": 7}"#) { request in
             #expect(request.httpMethod == "POST")
+            #expect(request.url?.absoluteString == "https://relay.example.com/api/contacts/sync")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h")
             let body = request.httpBody.flatMap { String(decoding: $0, as: UTF8.self) } ?? ""
             #expect(body.contains(#""baseCursor":123"#))
             #expect(body.contains(#""fn":"Ada""#))
@@ -333,6 +340,24 @@ private let validPairingLink = URL(
             )]
         )
         #expect(response.cursor == 7)
+    }
+
+    @Test func fetchPhotoSendsPairingAuthAsHeaders() async throws {
+        let client = stubClient(status: 200, json: "photo-bytes") { request in
+            #expect(request.httpMethod == "GET")
+            #expect(
+                request.url?.absoluteString
+                    == "https://relay.example.com/api/contacts/c-1/photo"
+            )
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Id") == "u")
+            #expect(request.value(forHTTPHeaderField: "X-Kypost-Subscriber-Hash") == "h")
+        }
+        let data = try await ContactSyncClient(httpClient: client).fetchPhoto(
+            serverUrl: "https://relay.example.com",
+            auth: RelayAuth(sub: "u", hash: "h"),
+            uid: "c-1"
+        )
+        #expect(String(decoding: data, as: UTF8.self) == "photo-bytes")
     }
 }
 
