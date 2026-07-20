@@ -52,7 +52,7 @@ final class PushPairingViewModel {
         }
     }
 
-    /// Pairs from a pasted llamalabels://native-pair link.
+    /// Pairs from a pasted kypost://native-pair link.
     func pairFromPastedLink() async {
         guard let url = URL(string: pastedLink.trimmingCharacters(in: .whitespacesAndNewlines)),
               let params = try? PairingLinkParser.parse(url) else {
@@ -62,7 +62,7 @@ final class PushPairingViewModel {
         await pair(params: params)
     }
 
-    /// Pairs from a scanned QR code containing a llamalabels://native-pair link.
+    /// Pairs from a scanned QR code containing a kypost://native-pair link.
     func pairFromScannedCode(_ payload: String) async {
         guard let url = URL(string: payload.trimmingCharacters(in: .whitespacesAndNewlines)),
               let params = try? PairingLinkParser.parse(url) else {

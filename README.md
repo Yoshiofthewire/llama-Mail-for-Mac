@@ -4,7 +4,7 @@ A native SwiftUI mail client for macOS and iOS that connects to a KyPost mail re
 
 The app talks only to the relay backend — there is no direct IMAP/SMTP. You pair a device once (QR code or deep link) and the relay handles mail access, server-side keyword tabs, push notifications, and contact sync.
 
-> **Naming:** the app is branded **KyPost** (Dock/Home Screen label, About screen, permission prompts). The Xcode project, scheme, and folders are still named `llama Mail for Mac`, and structural identifiers — bundle IDs and the `llamalabels://` deep-link scheme — are deliberately unchanged.
+> **Naming:** the app is branded **KyPost** (Dock/Home Screen label, About screen, permission prompts). The Xcode project, scheme, and folders are still named `llama Mail for Mac`, and bundle IDs are deliberately unchanged. The deep-link scheme, however, **is** renamed: it's `kypost://`, not `llamalabels://` — see the pairing repo-wide rebrand plan.
 
 ## Features
 
@@ -32,7 +32,7 @@ No external Swift package dependencies — persistence is SwiftData, networking 
 1. Open `llama Mail for Mac.xcodeproj` in Xcode.
 2. Select the *llama Mail for Mac* scheme and your destination (My Mac or an iOS device/simulator).
 3. Build and run.
-4. Pair the device: in the web frontend, open **Notifications → Pair Desktop App** (or scan the mobile pairing QR on iOS). The `llamalabels://native-pair?...` deep link registers the device and stores credentials in the Keychain.
+4. Pair the device: in the web frontend, open **Notifications → Pair Desktop App** (or scan the mobile pairing QR on iOS). The `kypost://native-pair?...` deep link registers the device and stores credentials in the Keychain.
 
 Until a device is paired, the inbox shows a prompt directing you to Settings → Connection.
 

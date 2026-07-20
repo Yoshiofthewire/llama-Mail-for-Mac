@@ -16,7 +16,7 @@ import Testing
 /// tests assert on the outgoing request.
 
 private let validPairingLink = URL(
-    string: "llamalabels://native-pair?sub=user1&srv=https://relay.example.com&pt=token9"
+    string: "kypost://native-pair?sub=user1&srv=https://relay.example.com&pt=token9"
 )!
 
 // MARK: - Pairing link parsing
@@ -53,14 +53,14 @@ private let validPairingLink = URL(
             .filter { $0.key != missing }
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: "&")
-        let url = URL(string: "llamalabels://native-pair?\(query)")!
+        let url = URL(string: "kypost://native-pair?\(query)")!
         #expect(throws: PairingLinkError.missingParameter(missing)) {
             try PairingLinkParser.parse(url)
         }
     }
 
     @Test func rejectsEmptyRequiredParameter() {
-        let url = URL(string: "llamalabels://native-pair?sub=&srv=https://s.example.com&pt=p")!
+        let url = URL(string: "kypost://native-pair?sub=&srv=https://s.example.com&pt=p")!
         #expect(throws: PairingLinkError.missingParameter("sub")) {
             try PairingLinkParser.parse(url)
         }
@@ -68,7 +68,7 @@ private let validPairingLink = URL(
 
     @Test func rejectsWrongSchemeOrHost() {
         let wrongScheme = URL(string: "https://native-pair?sub=u&srv=s&pt=p")!
-        let wrongHost = URL(string: "llamalabels://other-host?sub=u&srv=s&pt=p")!
+        let wrongHost = URL(string: "kypost://other-host?sub=u&srv=s&pt=p")!
         #expect(throws: PairingLinkError.notAPairingLink) {
             try PairingLinkParser.parse(wrongScheme)
         }

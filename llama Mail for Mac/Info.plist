@@ -9,7 +9,7 @@
 			<string>KyPost Pairing</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>llamalabels</string>
+				<string>kypost</string>
 			</array>
 		</dict>
 	</array>

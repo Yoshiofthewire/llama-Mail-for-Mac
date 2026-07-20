@@ -3,7 +3,7 @@
 //  llama Mail
 //
 //  Desktop pairing flow state (Desktop Pairing guide). Codes arrive via the
-//  llamalabels://desktop-pair deep link, or as a pasted link when the browser
+//  kypost://desktop-pair deep link, or as a pasted link when the browser
 //  could not launch the app.
 //
 
@@ -49,7 +49,7 @@ final class DesktopPairingViewModel {
         }
     }
 
-    /// Pairs from a pasted llamalabels://desktop-pair link.
+    /// Pairs from a pasted kypost://desktop-pair link.
     func pairFromPastedLink() async {
         guard let url = URL(string: pastedLink.trimmingCharacters(in: .whitespacesAndNewlines)),
               let params = try? DesktopPairingLinkParser.parse(url) else {

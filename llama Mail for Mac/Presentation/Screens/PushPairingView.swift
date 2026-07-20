@@ -13,7 +13,7 @@ struct PushPairingView: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
 
-    /// Non-nil when opened from a llamalabels://native-pair deep link.
+    /// Non-nil when opened from a kypost://native-pair deep link.
     let initialParams: PairingParams?
 
     @State private var viewModel = PushPairingViewModel(
@@ -102,7 +102,7 @@ struct PushPairingView: View {
                 .multilineTextAlignment(.center)
 #endif
 
-            TextField("llamalabels://native-pair?…", text: $viewModel.pastedLink)
+            TextField("kypost://native-pair?…", text: $viewModel.pastedLink)
                 .font(AppFont.mono(13))
                 .textFieldStyle(.plain)
                 .padding(12)

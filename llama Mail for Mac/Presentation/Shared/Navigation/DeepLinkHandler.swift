@@ -3,7 +3,7 @@
 //  llama Mail
 //
 //  Deep-link parsing and routing (spec §1, §10). Binding contract: the pairing
-//  scheme is exactly llamalabels://native-pair with required params
+//  scheme is exactly kypost://native-pair with required params
 //  sub, srv, pt and optional reg. There is no credential in the link itself —
 //  the per-device pairing secret is issued only via the registration
 //  response, never carried in the deep link/QR.
@@ -82,7 +82,7 @@ struct DesktopPairingParams: Equatable, Sendable {
 }
 
 enum DesktopPairingLinkParser {
-    /// Parses llamalabels://desktop-pair?code=…&srv=… links. Both params are
+    /// Parses kypost://desktop-pair?code=…&srv=… links. Both params are
     /// required and non-empty.
     static func parse(_ url: URL) throws -> DesktopPairingParams {
         guard

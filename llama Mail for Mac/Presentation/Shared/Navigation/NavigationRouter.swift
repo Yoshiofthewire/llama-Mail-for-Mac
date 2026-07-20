@@ -35,7 +35,7 @@ final class NavigationRouter {
     var selectedTab: AppTab = .inbox
     /// Presented pairing flow (from QR / deep link).
     var pairingParams: PairingParams?
-    /// Presented desktop pairing flow (llamalabels://desktop-pair deep link).
+    /// Presented desktop pairing flow (kypost://desktop-pair deep link).
     var desktopPairingParams: DesktopPairingParams?
     /// Presented in-app MFA approval fallback.
     var mfaRoute: MfaRoute?

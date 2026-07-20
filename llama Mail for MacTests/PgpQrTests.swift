@@ -127,7 +127,7 @@ private let keyJSON = #"""
         "https://mail.example.com/api/pgp/qr/key",
         "https://mail.example.com/api/pgp/qr/key?t=",
         // Another app's QR code entirely.
-        "llamalabels://native-pair?sub=1&hash=2",
+        "kypost://native-pair?sub=1&hash=2",
         "https://example.com",
         "not a url at all",
         "",

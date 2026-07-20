@@ -3,7 +3,7 @@
 //  llama Mail
 //
 //  Desktop pairing flow (Desktop Pairing guide). Auto-pairs when opened from
-//  a llamalabels://desktop-pair deep link; offers a paste-the-link fallback
+//  a kypost://desktop-pair deep link; offers a paste-the-link fallback
 //  for when the browser could not launch the app.
 //
 
@@ -13,7 +13,7 @@ struct DesktopPairingView: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
 
-    /// Non-nil when opened from a llamalabels://desktop-pair deep link.
+    /// Non-nil when opened from a kypost://desktop-pair deep link.
     let initialParams: DesktopPairingParams?
 
     @State private var viewModel = DesktopPairingViewModel(
@@ -93,7 +93,7 @@ struct DesktopPairingView: View {
                 .foregroundStyle(theme.ink)
                 .multilineTextAlignment(.center)
 
-            TextField("llamalabels://desktop-pair?…", text: $viewModel.pastedLink)
+            TextField("kypost://desktop-pair?…", text: $viewModel.pastedLink)
                 .font(AppFont.mono(13))
                 .textFieldStyle(.plain)
                 .padding(12)

@@ -9,11 +9,11 @@
 import Foundation
 
 enum Config {
-    // Binding contract: deep-link scheme is exactly llamalabels://native-pair.
-    static let deepLinkScheme = "llamalabels"
+    // Binding contract: deep-link scheme is exactly kypost://native-pair.
+    static let deepLinkScheme = "kypost"
     static let pairingHost = "native-pair"
 
-    // Desktop pairing (Desktop Pairing guide): llamalabels://desktop-pair?code=…&srv=…
+    // Desktop pairing (Desktop Pairing guide): kypost://desktop-pair?code=…&srv=…
     static let desktopPairingHost = "desktop-pair"
     /// Pairing codes are 32 characters (16 random bytes, hex-encoded).
     static let desktopPairingCodeLength = 32

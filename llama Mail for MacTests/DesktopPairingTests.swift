@@ -16,7 +16,7 @@ import Testing
 /// Sample code from the guide (32 chars, alphanumeric).
 private let validCode = "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6"
 private let validDesktopLink = URL(
-    string: "llamalabels://desktop-pair?code=\(validCode)&srv=https://relay.example.com"
+    string: "kypost://desktop-pair?code=\(validCode)&srv=https://relay.example.com"
 )!
 
 // MARK: - Register dedupe (one registration per code)
@@ -93,7 +93,7 @@ private let validDesktopLink = URL(
             .filter { $0.key != missing }
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: "&")
-        let url = URL(string: "llamalabels://desktop-pair?\(query)")!
+        let url = URL(string: "kypost://desktop-pair?\(query)")!
         #expect(throws: PairingLinkError.missingParameter(missing)) {
             try DesktopPairingLinkParser.parse(url)
         }
@@ -101,7 +101,7 @@ private let validDesktopLink = URL(
 
     @Test func rejectsWrongSchemeOrHost() {
         let wrongScheme = URL(string: "https://desktop-pair?code=c&srv=s")!
-        let wrongHost = URL(string: "llamalabels://native-pair?code=c&srv=s")!
+        let wrongHost = URL(string: "kypost://native-pair?code=c&srv=s")!
         #expect(throws: PairingLinkError.notAPairingLink) {
             try DesktopPairingLinkParser.parse(wrongScheme)
         }
