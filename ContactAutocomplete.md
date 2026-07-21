@@ -44,7 +44,7 @@ out. Half-typed search terms survive a blur without an error.
 | Directory modal | `Presentation/Screens/AddressBookView.swift` |
 | State, debounce, duplicates | `Presentation/Shared/ViewModels/ComposeViewModel.swift` |
 
-Durable contracts and platform deviations: `llama Mail for Mac/Presentation/AGENTS.md`.
+Durable contracts and platform deviations: `KyPost/Presentation/AGENTS.md`.
 
 ## Where this differs from the original spec
 

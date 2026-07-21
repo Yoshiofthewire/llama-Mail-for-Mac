@@ -2,7 +2,7 @@
 
 This document describes how to expose the backend's contact
 de-duplication feature (`llama-labels` repo) to all three mobile/desktop
-clients: this repo's Android app, `llama-Mail-for-Mac` (iOS/macOS), and
+clients: this repo's Android app, `kypost-for-Mac` (iOS/macOS), and
 `llama-Linux` (KDE Plasma Desktop + Plasma Mobile). It mirrors
 `Client_Contact_Update.md`'s shape — a Part 0 backend prerequisite, a
 shared contract, then one concrete section per client — written so a
@@ -286,10 +286,10 @@ fields.
 
 ---
 
-## iOS/macOS (`llama-Mail-for-Mac`)
+## iOS/macOS (`kypost-for-Mac`)
 
 **Network call** — add to `ContactSyncClient.swift`
-(`llama Mail for Mac/Data/Networking/ContactSyncClient.swift`), which
+(`KyPost/Data/Networking/ContactSyncClient.swift`), which
 already has `pull`/`push` following this exact shape:
 
 ```swift
@@ -319,13 +319,13 @@ private func dedupeEndpoint(_ serverUrl: String) throws -> URL {
 ```
 
 **Repository** — add a `dedupe()` method to `ContactSyncRepository.swift`
-(`llama Mail for Mac/Domain/Repositories/ContactSyncRepository.swift`),
+(`KyPost/Domain/Repositories/ContactSyncRepository.swift`),
 alongside its existing `sync()` (line 90). Same single-purpose rule as
 Android: `dedupe()` calls the client and returns the report/error; it
 does not call `sync()` itself.
 
 **UI wiring** — `ContactsListView.swift`
-(`llama Mail for Mac/Presentation/Screens/ContactsListView.swift`,
+(`KyPost/Presentation/Screens/ContactsListView.swift`,
 lines 58–74) has two `ToolbarItem { Button { ... } }` blocks already
 ("Add Contact", "Sync"). Add a third calling into
 `ContactsViewModel.swift`'s new `dedupe()` method (mirror its existing

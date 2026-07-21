@@ -77,8 +77,8 @@ Default section order:
 
 ## Testing
 
-- Run: `xcodebuild test -scheme "llama Mail for Mac" -destination 'platform=macOS'`.
-- `llama Mail for Mac.xctestplan` is the shared test plan, referenced from the
+- Run: `xcodebuild test -scheme "KyPost" -destination 'platform=macOS'`.
+- `KyPost.xctestplan` is the shared test plan, referenced from the
   shared scheme. Both test targets set `parallelizable: false`, and that must
   stay off.
 
@@ -102,7 +102,7 @@ When the user requests a durable behavior change, record it here or in the relev
 
 ## Child DOX Index
 
-- `llama Mail for Mac/Presentation/AGENTS.md` — SwiftUI views, view models, and
+- `KyPost/Presentation/AGENTS.md` — SwiftUI views, view models, and
   components: theming and font contracts, MainActor isolation rules, compose
   recipient tokens and contact search, and the macOS/iOS input deviations.
 

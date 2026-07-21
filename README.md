@@ -4,7 +4,7 @@ A native SwiftUI mail client for macOS and iOS that connects to a KyPost mail re
 
 The app talks only to the relay backend — there is no direct IMAP/SMTP. You pair a device once (QR code or deep link) and the relay handles mail access, server-side keyword tabs, push notifications, and contact sync.
 
-> **Naming:** the app is branded **KyPost** (Dock/Home Screen label, About screen, permission prompts). The Xcode project, scheme, and folders are still named `llama Mail for Mac`, and bundle IDs are deliberately unchanged. The deep-link scheme, however, **is** renamed: it's `kypost://`, not `llamalabels://` — see the pairing repo-wide rebrand plan.
+> **Naming:** the app is branded **KyPost** throughout — Dock/Home Screen label, About screen, permission prompts, the Xcode project/scheme/folders, and the deep-link scheme (`kypost://`). Bundle IDs and the Keychain access group are deliberately unchanged (`com.urlxl.mail`, etc.) — renaming those is a separate, higher-stakes decision (see `Brand_Refresh_KyPost.md`).
 
 ## Features
 
@@ -29,8 +29,8 @@ No external Swift package dependencies — persistence is SwiftData, networking 
 
 ## Getting started
 
-1. Open `llama Mail for Mac.xcodeproj` in Xcode.
-2. Select the *llama Mail for Mac* scheme and your destination (My Mac or an iOS device/simulator).
+1. Open `KyPost.xcodeproj` in Xcode.
+2. Select the *KyPost* scheme and your destination (My Mac or an iOS device/simulator).
 3. Build and run.
 4. Pair the device: in the web frontend, open **Notifications → Pair Desktop App** (or scan the mobile pairing QR on iOS). The `kypost://native-pair?...` deep link registers the device and stores credentials in the Keychain.
 
@@ -38,7 +38,7 @@ Until a device is paired, the inbox shows a prompt directing you to Settings →
 
 ## Architecture
 
-The target builds for both platforms from one codebase, laid out in `llama Mail for Mac/`:
+The target builds for both platforms from one codebase, laid out in `KyPost/`:
 
 | Layer | Contents |
 | --- | --- |
@@ -67,10 +67,10 @@ When touching any of these, check the Android implementation first rather than g
 
 ## Testing
 
-Unit tests use Swift Testing (`@Test`/`#expect`) and live in `llama Mail for MacTests/`; UI test stubs are in `llama Mail for MacUITests/`. Run them in Xcode (⌘U) or:
+Unit tests use Swift Testing (`@Test`/`#expect`) and live in `KyPost Tests/`; UI test stubs are in `KyPost UITests/`. Run them in Xcode (⌘U) or:
 
 ```sh
-xcodebuild test -project "llama Mail for Mac.xcodeproj" -scheme "llama Mail for Mac"
+xcodebuild test -project "KyPost.xcodeproj" -scheme "KyPost"
 ```
 
 Network-facing tests run against a stubbed `HTTPClient` — no backend needed.
