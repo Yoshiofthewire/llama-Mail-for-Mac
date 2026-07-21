@@ -16,6 +16,16 @@ actor ContactDAO {
         for contact in contacts {
             if let existing = try fetchEntity(localId: contact.localId)
                 ?? fetchEntity(uid: contact.uid) {
+                // A server-driven sync write (needsSync == false) must not
+                // clobber a local edit that landed more recently than this
+                // write's own snapshot — otherwise an in-flight, now-stale
+                // sync response can silently discard a user's correction
+                // (e.g. re-attaching a PGP key after noticing a bad one) and
+                // mark it as already synced, so it's never re-pushed either.
+                // The local edit stays queued and reconciles on the next sync.
+                if !contact.needsSync, existing.needsSync, existing.updatedAt > contact.updatedAt {
+                    continue
+                }
                 existing.uid = contact.uid ?? existing.uid
                 existing.rev = contact.rev
                 existing.name = contact.name

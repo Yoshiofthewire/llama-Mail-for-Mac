@@ -18,7 +18,8 @@ struct PushPairingView: View {
 
     @State private var viewModel = PushPairingViewModel(
         registrationService: SingletonGraph.shared.deviceRegistrationService,
-        pushSettingsStore: SingletonGraph.shared.pushSettingsStore
+        pushSettingsStore: SingletonGraph.shared.pushSettingsStore,
+        securePairingStore: SingletonGraph.shared.securePairingStore
     )
 #if os(iOS)
     /// nil until the camera permission request resolves.
@@ -31,6 +32,8 @@ struct PushPairingView: View {
                 switch viewModel.state {
                 case .idle:
                     idleContent
+                case .confirming(let confirmation):
+                    confirmingContent(confirmation)
                 case .working:
                     ProgressView("Pairing…")
                         .frame(maxHeight: .infinity)
@@ -83,9 +86,46 @@ struct PushPairingView: View {
         .tint(theme.accent)
         .task {
             if let initialParams {
-                await viewModel.pair(params: initialParams)
+                viewModel.present(params: initialParams)
             }
         }
+    }
+
+    /// Shown before any network call fires — names the destination host and
+    /// requires an explicit tap to continue, for every entry point (deep
+    /// link, scanned QR, pasted link). A crafted link/QR could otherwise
+    /// silently repoint the pairing at an attacker server.
+    private func confirmingContent(_ confirmation: PendingPairingConfirmation) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "network.badge.shield.half.filled")
+                .font(.system(size: 38))
+                .foregroundStyle(theme.accent)
+            Text("Pair with this server?")
+                .font(AppFont.ui(19, weight: .semibold))
+                .foregroundStyle(theme.inkStrong)
+            Text(URL(string: confirmation.params.srv)?.host ?? confirmation.params.srv)
+                .font(AppFont.mono(15))
+                .foregroundStyle(theme.inkStrong)
+                .multilineTextAlignment(.center)
+                .padding(12)
+                .frame(maxWidth: .infinity)
+                .background(theme.panel, in: RoundedRectangle(cornerRadius: Shape.field))
+            if let existingHost = confirmation.existingHost {
+                Text("This replaces your current pairing with \(existingHost).")
+                    .font(AppFont.ui(13))
+                    .foregroundStyle(SemanticColors.warning)
+                    .multilineTextAlignment(.center)
+            }
+            HStack(spacing: 12) {
+                Button("Cancel") { viewModel.reset() }
+                    .buttonStyle(SecondaryButtonStyle())
+                Button("Pair") {
+                    Task { await viewModel.pair(params: confirmation.params) }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+            }
+        }
+        .frame(maxHeight: .infinity)
     }
 
     private var idleContent: some View {

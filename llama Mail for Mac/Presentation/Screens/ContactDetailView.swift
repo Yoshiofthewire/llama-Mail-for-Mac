@@ -109,6 +109,9 @@ struct ContactDetailView: View {
                 if !draft.customFields.isEmpty {
                     customFieldsCard
                 }
+                if draft.pendingPgpKey != nil {
+                    pendingPgpKeyBanner
+                }
                 if draft.pgpKey != nil || contact?.uid != nil {
                     metadataCard
                 }
@@ -230,6 +233,54 @@ struct ContactDetailView: View {
             ForEach(Array(draft.customFields.enumerated()), id: \.offset) { _, field in
                 detailRow(icon: "tag", label: field.label, value: field.value)
             }
+        }
+    }
+
+    /// Shown when sync received a PGP key that differs from the one already
+    /// on file — see ContactSyncRepository.applyPgpKey. Mirrors the
+    /// "Replace existing key?" confirmation on the manual QR-attach path
+    /// (ScanPgpKeyView/ContactKeyPicker), extended to the sync path where a
+    /// compromised relay could otherwise swap a fingerprint-verified key
+    /// with no warning at all.
+    private var pendingPgpKeyBanner: some View {
+        card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.shield.fill")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(SemanticColors.warning)
+                        .frame(width: 32, height: 32)
+                        .background(SemanticColors.warning.opacity(0.15), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PGP KEY CHANGED")
+                            .font(AppFont.ui(11, weight: .medium))
+                            .foregroundStyle(theme.ink.opacity(0.65))
+                        Text("A different key arrived for this contact. Re-verify the fingerprint before trusting it.")
+                            .font(AppFont.ui(13))
+                            .foregroundStyle(theme.inkStrong)
+                    }
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 12) {
+                    Button("Keep Current Key") {
+                        let toDismiss = draft
+                        draft.pendingPgpKey = nil
+                        Task { await viewModel.dismissPendingPgpKey(for: toDismiss) }
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    Button("Trust New Key") {
+                        let toAccept = draft
+                        if let pending = draft.pendingPgpKey {
+                            draft.pgpKey = pending
+                        }
+                        draft.pendingPgpKey = nil
+                        Task { await viewModel.acceptPendingPgpKey(for: toAccept) }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
     }
 

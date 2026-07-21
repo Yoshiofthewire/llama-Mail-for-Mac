@@ -77,6 +77,91 @@ private let validDesktopLink = URL(
     }
 }
 
+// MARK: - DesktopPairingViewModel confirmation flow (pairing-hijack fix)
+
+@MainActor
+@Suite struct DesktopPairingViewModelTests {
+    private func makeViewModel(existingSession: Bool = false) throws -> DesktopPairingViewModel {
+        let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
+        let sessionStore = DesktopSessionStore(keychain: keychain)
+        if existingSession {
+            try sessionStore.saveSession(DesktopSession(
+                sessionToken: "old-token",
+                expiresAt: Date(timeIntervalSinceNow: 86_400),
+                userId: "u1",
+                userEmail: "user@example.com",
+                srv: server,
+                pairedAt: Date()
+            ))
+        }
+        return DesktopPairingViewModel(
+            pairingService: DesktopPairingService(
+                client: DesktopRegistrationClient(httpClient: stubClient()),
+                sessionStore: sessionStore
+            ),
+            sessionStore: sessionStore
+        )
+    }
+
+    private var params: DesktopPairingParams { DesktopPairingParams(code: validCode, srv: server) }
+
+    @Test func presentShowsTheDestinationHostBeforeAnyNetworkCall() throws {
+        let viewModel = try makeViewModel(existingSession: false)
+        viewModel.present(params: params)
+        #expect(viewModel.state == .confirming(
+            PendingDesktopPairingConfirmation(params: params, existingHost: nil)
+        ))
+    }
+
+    @Test func presentWarnsWhenAcceptingWouldReplaceAnExistingSession() throws {
+        let viewModel = try makeViewModel(existingSession: true)
+        viewModel.present(params: params)
+        #expect(viewModel.state == .confirming(
+            PendingDesktopPairingConfirmation(params: params, existingHost: URL(string: server)?.host)
+        ))
+    }
+
+    @Test func pairFromPastedLinkAsksForConfirmationInsteadOfPairingImmediately() async throws {
+        let viewModel = try makeViewModel()
+        viewModel.pastedLink = "kypost://desktop-pair?code=\(validCode)&srv=\(server)"
+        await viewModel.pairFromPastedLink()
+        guard case .confirming(let confirmation) = viewModel.state else {
+            Issue.record("Expected .confirming, got \(viewModel.state)")
+            return
+        }
+        #expect(confirmation.params == params)
+    }
+
+    @Test func confirmingThenPairStillCompletesRegistration() async throws {
+        let keychain = KeychainStorage(service: "com.urlxl.mail.tests.\(UUID().uuidString)")
+        let sessionStore = DesktopSessionStore(keychain: keychain)
+        let json = """
+        {"ok": true, "sessionToken": "jwt-token", "expiresIn": 86400, \
+        "userId": "u1", "userEmail": "user@example.com"}
+        """
+        let viewModel = DesktopPairingViewModel(
+            pairingService: DesktopPairingService(
+                client: DesktopRegistrationClient(httpClient: stubClient(json: json)),
+                sessionStore: sessionStore
+            ),
+            sessionStore: sessionStore
+        )
+        viewModel.present(params: params)
+        await viewModel.pair(params: params)
+        guard case .paired = viewModel.state else {
+            Issue.record("Expected .paired, got \(viewModel.state)")
+            return
+        }
+    }
+
+    @Test func resetReturnsToIdleFromConfirming() throws {
+        let viewModel = try makeViewModel()
+        viewModel.present(params: params)
+        viewModel.reset()
+        #expect(viewModel.state == .idle)
+    }
+}
+
 // MARK: - Deep-link parsing
 
 @Suite struct DesktopPairingLinkParserTests {
@@ -107,6 +192,14 @@ private let validDesktopLink = URL(
         }
         #expect(throws: PairingLinkError.notAPairingLink) {
             try DesktopPairingLinkParser.parse(wrongHost)
+        }
+    }
+
+    /// A crafted link pointing `srv` at a plaintext host must be rejected.
+    @Test func rejectsNonHttpsServerURL() {
+        let url = URL(string: "kypost://desktop-pair?code=\(validCode)&srv=http://relay.example.com")!
+        #expect(throws: PairingLinkError.insecureServerURL) {
+            try DesktopPairingLinkParser.parse(url)
         }
     }
 

@@ -34,11 +34,17 @@ struct PairingParams: Equatable, Sendable {
 enum PairingLinkError: Error, Equatable {
     case notAPairingLink
     case missingParameter(String)
+    /// `srv`/`reg` must be `https` — the pairing exchange sends the device's
+    /// real push token and (on success) mints the per-device secret, so a
+    /// plaintext destination could have both intercepted in transit.
+    case insecureServerURL
 }
 
 enum PairingLinkParser {
     /// Parses and validates a pairing link. All required params must be
-    /// present and non-empty (spec §1).
+    /// present and non-empty (spec §1), and `srv`/`reg` must be `https` URLs
+    /// (mirrors the same check already applied to the PGP QR-key flow in
+    /// PgpQrClient.keyURL(fromScannedPayload:)).
     static func parse(_ url: URL) throws -> PairingParams {
         guard
             url.scheme?.lowercased() == Config.deepLinkScheme,
@@ -59,11 +65,20 @@ enum PairingLinkParser {
             return value
         }
 
+        let srv = try required("srv")
+        guard URL(string: srv)?.scheme?.lowercased() == "https" else {
+            throw PairingLinkError.insecureServerURL
+        }
+        let reg = query["reg"].flatMap { $0.isEmpty ? nil : $0 }
+        if let reg, URL(string: reg)?.scheme?.lowercased() != "https" {
+            throw PairingLinkError.insecureServerURL
+        }
+
         return PairingParams(
             sub: try required("sub"),
-            srv: try required("srv"),
+            srv: srv,
             pt: try required("pt"),
-            reg: query["reg"].flatMap { $0.isEmpty ? nil : $0 }
+            reg: reg
         )
     }
 }
@@ -83,7 +98,8 @@ struct DesktopPairingParams: Equatable, Sendable {
 
 enum DesktopPairingLinkParser {
     /// Parses kypost://desktop-pair?code=…&srv=… links. Both params are
-    /// required and non-empty.
+    /// required and non-empty, and `srv` must be an `https` URL (see
+    /// PairingLinkError.insecureServerURL).
     static func parse(_ url: URL) throws -> DesktopPairingParams {
         guard
             url.scheme?.lowercased() == Config.deepLinkScheme,
@@ -102,6 +118,9 @@ enum DesktopPairingLinkParser {
         }
         guard let srv = query["srv"], !srv.isEmpty else {
             throw PairingLinkError.missingParameter("srv")
+        }
+        guard URL(string: srv)?.scheme?.lowercased() == "https" else {
+            throw PairingLinkError.insecureServerURL
         }
         return DesktopPairingParams(code: code, srv: srv)
     }

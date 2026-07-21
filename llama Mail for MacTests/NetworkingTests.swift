@@ -77,6 +77,25 @@ private let validPairingLink = URL(
         }
     }
 
+    /// A crafted link pointing `srv` at a plaintext host must be rejected
+    /// before it can exfiltrate the device's push token / pairing token.
+    @Test func rejectsNonHttpsServerURL() {
+        let url = URL(string: "kypost://native-pair?sub=u&srv=http://relay.example.com&pt=p")!
+        #expect(throws: PairingLinkError.insecureServerURL) {
+            try PairingLinkParser.parse(url)
+        }
+    }
+
+    @Test func rejectsNonHttpsRegParameter() {
+        let url = URL(
+            string: "kypost://native-pair?sub=u&srv=https://relay.example.com&pt=p"
+                + "&reg=http://evil.example.com/register"
+        )!
+        #expect(throws: PairingLinkError.insecureServerURL) {
+            try PairingLinkParser.parse(url)
+        }
+    }
+
     @Test func deepLinkHandlerRoutesPairingLinks() throws {
         let handler = DeepLinkHandler()
         let action = handler.handle(validPairingLink)

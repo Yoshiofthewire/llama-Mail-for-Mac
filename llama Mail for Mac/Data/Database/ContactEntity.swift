@@ -42,6 +42,9 @@ final class ContactEntity {
     var photoRef: String?
     var groupIDs: [String] = []
     var pgpKey: String?
+    /// A key from sync awaiting review before it replaces `pgpKey` — see
+    /// Contact.pendingPgpKey.
+    var pendingPgpKey: String?
     var ims: [ContactIM] = []
     var websites: [ContactLabeledValue] = []
     var relations: [ContactRelation] = []
@@ -111,6 +114,7 @@ extension ContactEntity {
         photoRef = contact.photoRef
         groupIDs = contact.groupIDs
         pgpKey = contact.pgpKey
+        pendingPgpKey = contact.pendingPgpKey
         ims = contact.ims
         websites = contact.websites
         relations = contact.relations
@@ -145,6 +149,7 @@ extension ContactEntity {
             photoRef: photoRef,
             groupIDs: groupIDs,
             pgpKey: pgpKey,
+            pendingPgpKey: pendingPgpKey,
             ims: ims,
             websites: websites,
             relations: relations,

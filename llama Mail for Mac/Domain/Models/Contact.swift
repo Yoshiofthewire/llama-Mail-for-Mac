@@ -94,6 +94,10 @@ nonisolated struct Contact: Identifiable, Hashable, Sendable {
     var groupIDs: [String] = []
     /// Armored ASCII PGP public key; app-only, never exported to Contacts.app.
     var pgpKey: String?
+    /// A key received via sync that differs from the currently-stored
+    /// `pgpKey` and hasn't been reviewed yet. Sync never silently replaces a
+    /// fingerprint-verified key — see ContactSyncRepository.applyServerContact.
+    var pendingPgpKey: String?
     var ims: [ContactIM] = []
     var websites: [ContactLabeledValue] = []
     var relations: [ContactRelation] = []

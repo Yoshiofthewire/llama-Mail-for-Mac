@@ -94,6 +94,19 @@ final class ContactsViewModel {
         await load()
     }
 
+    /// Trusts a PGP key that arrived via sync, after the user has
+    /// independently re-verified it out-of-band.
+    func acceptPendingPgpKey(for contact: Contact) async {
+        try? await repository.acceptPendingPgpKey(for: contact)
+        await load()
+    }
+
+    /// Discards a PGP key that arrived via sync, keeping the key on file.
+    func dismissPendingPgpKey(for contact: Contact) async {
+        try? await repository.dismissPendingPgpKey(for: contact)
+        await load()
+    }
+
     func delete(_ contact: Contact) async {
         try? await repository.deleteContact(contact)
         await load()

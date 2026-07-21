@@ -10,11 +10,23 @@
 import Foundation
 import Observation
 
+/// A parsed pairing link/QR code awaiting the user's explicit confirmation
+/// before any network call fires. `existingHost` is set when accepting would
+/// replace an already-paired device, so the confirmation screen can warn
+/// about it.
+struct PendingPairingConfirmation: Equatable, Sendable {
+    let params: PairingParams
+    let existingHost: String?
+}
+
 @Observable
 @MainActor
 final class PushPairingViewModel {
     enum State: Equatable {
         case idle
+        /// Destination host shown; the network call fires only once the
+        /// user taps through (see `pair(params:)`).
+        case confirming(PendingPairingConfirmation)
         case working
         case paired(deviceId: String?)
         case failed(String)
@@ -22,16 +34,33 @@ final class PushPairingViewModel {
 
     private let registrationService: DeviceRegistrationService
     private let pushSettingsStore: PushSettingsStore
+    private let securePairingStore: SecurePairingStore
 
     private(set) var state: State = .idle
     var pastedLink = ""
 
     init(
         registrationService: DeviceRegistrationService,
-        pushSettingsStore: PushSettingsStore
+        pushSettingsStore: PushSettingsStore,
+        securePairingStore: SecurePairingStore
     ) {
         self.registrationService = registrationService
         self.pushSettingsStore = pushSettingsStore
+        self.securePairingStore = securePairingStore
+    }
+
+    /// Shows the destination host and waits for explicit confirmation —
+    /// called instead of pairing immediately for every entry point (deep
+    /// link, scanned QR, pasted link), since a crafted link/QR could
+    /// otherwise silently repoint the pairing at an attacker server with no
+    /// warning at all.
+    func present(params: PairingParams) {
+        state = .confirming(PendingPairingConfirmation(params: params, existingHost: currentPairedHost))
+    }
+
+    private var currentPairedHost: String? {
+        guard let pairing = try? securePairingStore.loadPairing() else { return nil }
+        return URL(string: pairing.srv)?.host
     }
 
     func pair(params: PairingParams) async {
@@ -52,24 +81,25 @@ final class PushPairingViewModel {
         }
     }
 
-    /// Pairs from a pasted kypost://native-pair link.
+    /// Parses a pasted kypost://native-pair link and asks for confirmation.
     func pairFromPastedLink() async {
         guard let url = URL(string: pastedLink.trimmingCharacters(in: .whitespacesAndNewlines)),
               let params = try? PairingLinkParser.parse(url) else {
             state = .failed("That doesn't look like a valid pairing link.")
             return
         }
-        await pair(params: params)
+        present(params: params)
     }
 
-    /// Pairs from a scanned QR code containing a kypost://native-pair link.
+    /// Parses a scanned QR code containing a kypost://native-pair link and
+    /// asks for confirmation.
     func pairFromScannedCode(_ payload: String) async {
         guard let url = URL(string: payload.trimmingCharacters(in: .whitespacesAndNewlines)),
               let params = try? PairingLinkParser.parse(url) else {
             state = .failed("That QR code isn't a KyPost pairing code.")
             return
         }
-        await pair(params: params)
+        present(params: params)
     }
 
     /// Back to the scan/paste screen after a failure.

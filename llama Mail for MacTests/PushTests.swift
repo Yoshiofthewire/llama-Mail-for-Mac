@@ -87,6 +87,35 @@ private func makePairing(lastDeviceId: String? = "dev-1", deviceSecret: String =
     }
 }
 
+// MARK: - Notification categories
+
+@Suite struct PushNotificationDispatcherCategoryTests {
+    @Test func approveActionRequiresDeviceAuthentication() throws {
+        // A single tap from a locked-screen banner must not be enough to
+        // approve a sign-in — the device must be unlocked first.
+        let mfa = try #require(
+            PushNotificationDispatcher.categories.first { $0.identifier == PushNotificationDispatcher.mfaCategoryId }
+        )
+        let approve = try #require(
+            mfa.actions.first { $0.identifier == PushNotificationDispatcher.approveActionId }
+        )
+        #expect(approve.options.contains(.authenticationRequired))
+    }
+
+    @Test func denyActionRemainsDestructiveAndUnauthenticated() throws {
+        // Denying isn't a sensitive action, so no reason to gate it — this
+        // pins the deny action's options so a future edit can't silently
+        // change them alongside the approve fix.
+        let mfa = try #require(
+            PushNotificationDispatcher.categories.first { $0.identifier == PushNotificationDispatcher.mfaCategoryId }
+        )
+        let deny = try #require(
+            mfa.actions.first { $0.identifier == PushNotificationDispatcher.denyActionId }
+        )
+        #expect(deny.options == [.destructive])
+    }
+}
+
 // MARK: - PushRepository
 
 @Suite struct PushRepositoryTests {
@@ -288,6 +317,96 @@ private func makePairing(lastDeviceId: String? = "dev-1", deviceSecret: String =
             Issue.record("Expected success, got \(outcome)")
             return
         }
+    }
+}
+
+// MARK: - PushPairingViewModel confirmation flow (pairing-hijack fix)
+
+@MainActor
+@Suite struct PushPairingViewModelTests {
+    private func makeViewModel(paired: Bool = false) throws -> PushPairingViewModel {
+        let (defaults, keychain) = scratchStores()
+        let pairingStore = SecurePairingStore(keychain: keychain)
+        if paired {
+            try pairingStore.savePairing(makePairing())
+        }
+        return PushPairingViewModel(
+            registrationService: DeviceRegistrationService(
+                client: NativeRegistrationClient(httpClient: stubClient()),
+                securePairingStore: pairingStore,
+                pushSettingsStore: PushSettingsStore(defaults: defaults)
+            ),
+            pushSettingsStore: PushSettingsStore(defaults: defaults),
+            securePairingStore: pairingStore
+        )
+    }
+
+    private let params = PairingParams(sub: "u1", srv: "https://relay.example.com", pt: "pt-1")
+
+    @Test func presentShowsTheDestinationHostBeforeAnyNetworkCall() throws {
+        let viewModel = try makeViewModel(paired: false)
+        viewModel.present(params: params)
+        #expect(viewModel.state == .confirming(
+            PendingPairingConfirmation(params: params, existingHost: nil)
+        ))
+    }
+
+    @Test func presentWarnsWhenAcceptingWouldReplaceAnExistingPairing() throws {
+        let viewModel = try makeViewModel(paired: true)
+        viewModel.present(params: params)
+        #expect(viewModel.state == .confirming(
+            PendingPairingConfirmation(params: params, existingHost: URL(string: server)?.host)
+        ))
+    }
+
+    @Test func pairFromPastedLinkAsksForConfirmationInsteadOfPairingImmediately() async throws {
+        let viewModel = try makeViewModel()
+        viewModel.pastedLink = "kypost://native-pair?sub=u1&srv=https://relay.example.com&pt=pt-1"
+        await viewModel.pairFromPastedLink()
+        guard case .confirming(let confirmation) = viewModel.state else {
+            Issue.record("Expected .confirming, got \(viewModel.state)")
+            return
+        }
+        #expect(confirmation.params == params)
+    }
+
+    @Test func pairFromScannedCodeAsksForConfirmationInsteadOfPairingImmediately() async throws {
+        let viewModel = try makeViewModel()
+        await viewModel.pairFromScannedCode("kypost://native-pair?sub=u1&srv=https://relay.example.com&pt=pt-1")
+        guard case .confirming(let confirmation) = viewModel.state else {
+            Issue.record("Expected .confirming, got \(viewModel.state)")
+            return
+        }
+        #expect(confirmation.params == params)
+    }
+
+    @Test func confirmingThenPairStillCompletesRegistration() async throws {
+        let (defaults, keychain) = scratchStores()
+        let pairingStore = SecurePairingStore(keychain: keychain)
+        let viewModel = PushPairingViewModel(
+            registrationService: DeviceRegistrationService(
+                client: NativeRegistrationClient(
+                    httpClient: stubClient(json: #"{"ok": true, "deviceId": "dev-7"}"#)
+                ),
+                securePairingStore: pairingStore,
+                pushSettingsStore: PushSettingsStore(defaults: defaults)
+            ),
+            pushSettingsStore: PushSettingsStore(defaults: defaults),
+            securePairingStore: pairingStore
+        )
+        viewModel.present(params: params)
+        await viewModel.pair(params: params)
+        guard case .paired = viewModel.state else {
+            Issue.record("Expected .paired, got \(viewModel.state)")
+            return
+        }
+    }
+
+    @Test func resetReturnsToIdleFromConfirming() throws {
+        let viewModel = try makeViewModel()
+        viewModel.present(params: params)
+        viewModel.reset()
+        #expect(viewModel.state == .idle)
     }
 }
 

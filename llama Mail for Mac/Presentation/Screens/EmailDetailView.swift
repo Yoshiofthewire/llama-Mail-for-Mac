@@ -347,29 +347,83 @@ private struct AttachmentDocument: FileDocument {
 
 /// Renders one email's HTML; link taps open in the default browser instead
 /// of navigating the message view.
-private struct EmailBodyWebView: View {
+///
+/// Sender-controlled HTML is untrusted input, the same way it is in any mail
+/// client: JavaScript execution is disabled unconditionally (mainstream mail
+/// clients — Apple Mail, Thunderbird, Outlook — do the same in their message
+/// view), and remote resources (images, stylesheets, anything with a network
+/// fetch of its own) are blocked by default, matching those clients'
+/// "load remote content" opt-in, so a message can't silently beacon home or
+/// probe the local network the moment it's opened.
+struct EmailBodyWebView: View {
     let html: String
 
+    @Environment(\.theme) private var theme
     @Environment(\.openURL) private var openURL
     @State private var page: WebPage?
+    @State private var allowsRemoteContent = false
+
+    private struct LoadKey: Equatable {
+        let html: String
+        let allowsRemoteContent: Bool
+    }
 
     var body: some View {
-        Group {
-            if let page {
-                WebView(page)
-                    .webViewBackForwardNavigationGestures(.disabled)
-            } else {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(alignment: .leading, spacing: 0) {
+            if !allowsRemoteContent {
+                remoteContentBanner
+            }
+            Group {
+                if let page {
+                    WebView(page)
+                        .webViewBackForwardNavigationGestures(.disabled)
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
-        .task(id: html) {
-            let page = self.page ?? WebPage(navigationDecider: LinksOpenExternally(openURL: openURL))
+        .task(id: LoadKey(html: html, allowsRemoteContent: allowsRemoteContent)) {
+            // Rebuilt (not reused) whenever `allowsRemoteContent` changes —
+            // `loadsSubresources` is fixed at configuration time, so opting
+            // in to remote content requires a fresh WebPage.
+            let page = WebPage(
+                configuration: Self.makeConfiguration(allowsRemoteContent: allowsRemoteContent),
+                navigationDecider: LinksOpenExternally(openURL: openURL)
+            )
             self.page = page
             page.load(html: html)
         }
     }
 
+    private var remoteContentBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "shield.lefthalf.filled")
+                .foregroundStyle(theme.ink.opacity(0.7))
+            Text("Remote images and content are blocked.")
+                .font(AppFont.ui(12))
+                .foregroundStyle(theme.ink)
+            Spacer(minLength: 8)
+            Button("Load Remote Content") { allowsRemoteContent = true }
+                .font(AppFont.ui(12, weight: .medium))
+                .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.panel, in: RoundedRectangle(cornerRadius: Shape.field))
+    }
+
+    /// Pure so the hardening it applies (JS off unconditionally, remote
+    /// content gated) is directly testable without touching WebKit itself.
+    static func makeConfiguration(allowsRemoteContent: Bool) -> WebPage.Configuration {
+        var configuration = WebPage.Configuration()
+        configuration.defaultNavigationPreferences.allowsContentJavaScript = false
+        configuration.loadsSubresources = allowsRemoteContent
+        return configuration
+    }
+
+    /// Only a real link tap reaches here — JavaScript is disabled above, so
+    /// a script-driven redirect of this navigation is no longer possible.
     private struct LinksOpenExternally: WebPage.NavigationDeciding {
         let openURL: OpenURLAction
 

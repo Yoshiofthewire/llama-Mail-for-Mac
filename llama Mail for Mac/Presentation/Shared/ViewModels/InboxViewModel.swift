@@ -202,10 +202,14 @@ final class InboxViewModel {
     /// Downloads one attachment to a temporary file and returns its URL
     /// (for Quick Look / opening externally), or nil on failure.
     func downloadAttachment(_ attachment: EmailAttachment, of email: Email) async -> URL? {
+        guard let cacheKey = Self.sanitizedCacheComponent(email.serverId) else {
+            errorMessage = "Could not download attachment: invalid message id"
+            return nil
+        }
         guard let data = await attachmentData(attachment, of: email) else { return nil }
         do {
             let directory = FileManager.default.temporaryDirectory
-                .appending(path: "attachments/\(email.serverId)/\(attachment.index)")
+                .appending(path: "attachments/\(cacheKey)/\(attachment.index)")
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let safeName = attachment.name
                 .replacingOccurrences(of: "/", with: "_")
@@ -217,6 +221,19 @@ final class InboxViewModel {
             errorMessage = "Could not download attachment: \(error.localizedDescription)"
             return nil
         }
+    }
+
+    /// The relay-supplied `serverId` must never be trusted as a path
+    /// component (mirrors the same guard in ContactPhotoCache.fileURL) — a
+    /// crafted "../" value would otherwise redirect the cache write outside
+    /// the intended attachments subtree.
+    static func sanitizedCacheComponent(_ value: String) -> String? {
+        guard !value.isEmpty,
+              !value.contains("/"),
+              !value.contains(".."),
+              !value.contains("\0")
+        else { return nil }
+        return value
     }
 
     private func apply(emails newEmails: [Email]) {

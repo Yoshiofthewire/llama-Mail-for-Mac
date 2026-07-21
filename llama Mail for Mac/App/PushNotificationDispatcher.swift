@@ -43,7 +43,14 @@ final class PushNotificationDispatcher: NSObject {
     /// Call once at launch, before any notification can arrive.
     func configure(center: UNUserNotificationCenter = .current()) {
         center.delegate = self
+        center.setNotificationCategories(Self.categories)
+    }
 
+    /// Exposed as a pure value (rather than built inline inside `configure`)
+    /// so its action options — notably that Approve requires device
+    /// authentication — are directly testable without touching the real
+    /// notification center.
+    static var categories: Set<UNNotificationCategory> {
         let mailCategory = UNNotificationCategory(
             identifier: Self.mailCategoryId,
             actions: [], // no direct actions; tap opens inbox (spec §3)
@@ -53,13 +60,20 @@ final class PushNotificationDispatcher: NSObject {
         let mfaCategory = UNNotificationCategory(
             identifier: Self.mfaCategoryId,
             actions: [
-                UNNotificationAction(identifier: Self.approveActionId, title: "Approve", options: []),
+                // .authenticationRequired: approving a sign-in must not be
+                // possible with a single tap on a locked-screen banner — the
+                // device must be unlocked first.
+                UNNotificationAction(
+                    identifier: Self.approveActionId,
+                    title: "Approve",
+                    options: [.authenticationRequired]
+                ),
                 UNNotificationAction(identifier: Self.denyActionId, title: "Deny", options: [.destructive]),
             ],
             intentIdentifiers: [],
             options: [.customDismissAction]
         )
-        center.setNotificationCategories([mailCategory, mfaCategory])
+        return [mailCategory, mfaCategory]
     }
 
     /// Spec §3: request at first app launch. Denial is fine — payloads are

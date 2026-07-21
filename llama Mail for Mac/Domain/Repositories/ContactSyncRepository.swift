@@ -66,6 +66,27 @@ final class ContactSyncRepository {
         await systemContactsExporter?.exportUpsert(dirty)
     }
 
+    /// Trusts a PGP key that arrived via sync and was held for review
+    /// (`applyPgpKey`), replacing the previously-stored key. Call only after
+    /// the user has independently re-verified the new key out-of-band.
+    func acceptPendingPgpKey(for contact: Contact) async throws {
+        guard let pending = contact.pendingPgpKey else { return }
+        var updated = contact
+        updated.pgpKey = pending
+        updated.pendingPgpKey = nil
+        try await contactDAO.upsert(contacts: [updated])
+    }
+
+    /// Discards a PGP key that arrived via sync, keeping the key already on
+    /// file. The server still holds the new key, so it reappears for review
+    /// on a later sync until the user accepts it or edits the contact.
+    func dismissPendingPgpKey(for contact: Contact) async throws {
+        guard contact.pendingPgpKey != nil else { return }
+        var updated = contact
+        updated.pendingPgpKey = nil
+        try await contactDAO.upsert(contacts: [updated])
+    }
+
     /// Deletes locally now; synced contacts get a tombstone so the delete
     /// reaches the server with the next sync request.
     func deleteContact(_ contact: Contact) async throws {
@@ -344,7 +365,7 @@ final class ContactSyncRepository {
         contact.birthday = dto.birthday ?? ""
         contact.photoRef = dto.photoRef
         contact.groupIDs = dto.groupIDs ?? []
-        contact.pgpKey = dto.pgpKey
+        Self.applyPgpKey(from: dto.pgpKey, existing: existing, to: &contact)
         contact.ims = (dto.ims ?? []).map {
             ContactIM(service: $0.service, label: $0.label, value: $0.value)
         }
@@ -365,6 +386,27 @@ final class ContactSyncRepository {
         }
         contact.pronouns = dto.pronouns ?? ""
         try await contactDAO.upsert(contacts: [contact])
+    }
+
+    /// A key received via sync that differs from an already-trusted key is
+    /// held in `pendingPgpKey` for review instead of silently replacing it.
+    /// The server is fully trusted for ordinary contact fields, but a PGP
+    /// key's whole value is the out-of-band fingerprint verification the
+    /// user did at QR-exchange time (ScanPgpKeyView) — a compromised relay
+    /// could otherwise defeat that verification by swapping the key on the
+    /// next routine sync, with no warning. A missing/empty incoming key, or
+    /// one identical to what's already stored, applies immediately.
+    private static func applyPgpKey(from incoming: String?, existing: Contact?, to contact: inout Contact) {
+        guard let existingKey = existing?.pgpKey, !existingKey.isEmpty,
+              let incoming, !incoming.isEmpty,
+              incoming != existingKey
+        else {
+            contact.pgpKey = incoming
+            contact.pendingPgpKey = nil
+            return
+        }
+        contact.pgpKey = existingKey
+        contact.pendingPgpKey = incoming
     }
 }
 

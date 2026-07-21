@@ -368,6 +368,45 @@ private func makeOutgoing(
     }
 }
 
+// MARK: - Email HTML rendering hardening (WebView JS / remote content)
+
+@Suite struct EmailBodyWebViewConfigurationTests {
+    @Test func javaScriptIsAlwaysDisabledRegardlessOfRemoteContentSetting() {
+        #expect(
+            EmailBodyWebView.makeConfiguration(allowsRemoteContent: false)
+                .defaultNavigationPreferences.allowsContentJavaScript == false
+        )
+        #expect(
+            EmailBodyWebView.makeConfiguration(allowsRemoteContent: true)
+                .defaultNavigationPreferences.allowsContentJavaScript == false
+        )
+    }
+
+    @Test func remoteContentIsBlockedByDefaultAndOnlyLoadsWhenExplicitlyAllowed() {
+        #expect(EmailBodyWebView.makeConfiguration(allowsRemoteContent: false).loadsSubresources == false)
+        #expect(EmailBodyWebView.makeConfiguration(allowsRemoteContent: true).loadsSubresources == true)
+    }
+}
+
+// MARK: - Attachment cache path sanitization
+
+@Suite struct InboxViewModelAttachmentCachePathTests {
+    @Test func acceptsAnOrdinaryServerId() {
+        #expect(InboxViewModel.sanitizedCacheComponent("e-1") == "e-1")
+    }
+
+    @Test(arguments: [
+        "",
+        "../../Library/Preferences/evil",
+        "..",
+        "sub/dir",
+        "null\0byte",
+    ])
+    func rejectsPathTraversalAndSeparators(value: String) {
+        #expect(InboxViewModel.sanitizedCacheComponent(value) == nil)
+    }
+}
+
 // MARK: - MailOutcome mapping
 
 @Suite struct MailOutcomeTests {

@@ -167,6 +167,66 @@ private func makeDTO(
     }
 }
 
+// MARK: - DAO write-ordering guard (race with an in-flight sync)
+
+@Suite struct ContactDAOStaleSyncWriteTests {
+    @Test func staleServerWriteDoesNotClobberANewerLocalCorrection() async throws {
+        let db = try AppDatabase(inMemory: true)
+        let dao = ContactDAO(modelContainer: db.container)
+        let localId = UUID()
+
+        let original = Contact(
+            localId: localId, uid: "srv-1", name: "Bob",
+            pgpKey: "attacker-key",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            needsSync: false
+        )
+        try await dao.upsert(contacts: [original])
+
+        // User notices the bad key and re-attaches the correct one — a local
+        // edit landing after the stale sync response was fetched.
+        var corrected = original
+        corrected.pgpKey = "verified-key"
+        corrected.needsSync = true
+        corrected.updatedAt = Date(timeIntervalSince1970: 2_000)
+        try await dao.upsert(contacts: [corrected])
+
+        // The in-flight sync's response (fetched before the correction) now
+        // applies, carrying the old key with needsSync: false and an
+        // updatedAt older than the correction.
+        var staleFromSync = original
+        staleFromSync.updatedAt = Date(timeIntervalSince1970: 1_500)
+        try await dao.upsert(contacts: [staleFromSync])
+
+        let stored = try #require(try await dao.getContact(uid: "srv-1"))
+        #expect(stored.pgpKey == "verified-key")
+        #expect(stored.needsSync == true)
+    }
+
+    @Test func ordinaryServerSyncStillOverwritesWhenNoPendingLocalEditExists() async throws {
+        let db = try AppDatabase(inMemory: true)
+        let dao = ContactDAO(modelContainer: db.container)
+        let localId = UUID()
+
+        let original = Contact(
+            localId: localId, uid: "srv-1", name: "Bob", pgpKey: "old-key",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            needsSync: false
+        )
+        try await dao.upsert(contacts: [original])
+
+        var fromServer = original
+        fromServer.pgpKey = "new-key"
+        fromServer.updatedAt = Date(timeIntervalSince1970: 2_000)
+        try await dao.upsert(contacts: [fromServer])
+
+        let stored = try #require(try await dao.getContact(uid: "srv-1"))
+        #expect(stored.pgpKey == "new-key")
+    }
+}
+
 // MARK: - Repository
 
 @Suite struct ContactSyncRepositoryTests {
@@ -799,6 +859,104 @@ private func makeDTO(
             ContactLabeledValue(label: "work", value: "ada@example.com"),
             ContactLabeledValue(label: "home", value: "ada@home.example.com"),
         ])
+    }
+}
+
+// MARK: - PGP key change review (fix for silent overwrite of a verified key)
+
+@Suite struct PgpKeyChangeReviewTests {
+    private struct Environment {
+        var repository: ContactSyncRepository
+        var dao: ContactDAO
+    }
+
+    private func makeEnvironment(client: HTTPClient) throws -> Environment {
+        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
+        let pairingStore = try makePairedStore()
+        let db = try AppDatabase(inMemory: true)
+        let dao = ContactDAO(modelContainer: db.container)
+        let repository = ContactSyncRepository(
+            client: ContactSyncClient(httpClient: client),
+            contactDAO: dao,
+            cursorStore: ContactCursorStore(defaults: defaults),
+            pendingDeletesStore: ContactPendingDeletesStore(defaults: defaults),
+            securePairingStore: pairingStore
+        )
+        return Environment(repository: repository, dao: dao)
+    }
+
+    @Test func serverKeyChangeIsHeldForReviewInsteadOfOverwritingAVerifiedKey() async throws {
+        let json = #"""
+        {"cursor": 2, "changed": [{"uid": "srv-1", "rev": 2, "fn": "Bob", "pgpKey": "attacker-key"}]}
+        """#
+        let env = try makeEnvironment(client: stubClient(json: json))
+        var seeded = makeContact(uid: "srv-1", name: "Bob")
+        seeded.pgpKey = "verified-key"
+        try await env.dao.upsert(contacts: [seeded])
+
+        try await env.repository.sync()
+
+        let stored = try #require(try await env.dao.getContact(uid: "srv-1"))
+        #expect(stored.pgpKey == "verified-key")
+        #expect(stored.pendingPgpKey == "attacker-key")
+    }
+
+    @Test func newlyReceivedKeyAppliesImmediatelyWhenNoneExistedBefore() async throws {
+        let json = #"""
+        {"cursor": 2, "changed": [{"uid": "srv-1", "rev": 2, "fn": "Bob", "pgpKey": "first-key"}]}
+        """#
+        let env = try makeEnvironment(client: stubClient(json: json))
+        try await env.dao.upsert(contacts: [makeContact(uid: "srv-1", name: "Bob")])
+
+        try await env.repository.sync()
+
+        let stored = try #require(try await env.dao.getContact(uid: "srv-1"))
+        #expect(stored.pgpKey == "first-key")
+        #expect(stored.pendingPgpKey == nil)
+    }
+
+    @Test func matchingKeyAppliesWithoutFlaggingForReview() async throws {
+        let json = #"""
+        {"cursor": 2, "changed": [{"uid": "srv-1", "rev": 2, "fn": "Bob", "pgpKey": "same-key"}]}
+        """#
+        let env = try makeEnvironment(client: stubClient(json: json))
+        var seeded = makeContact(uid: "srv-1", name: "Bob")
+        seeded.pgpKey = "same-key"
+        try await env.dao.upsert(contacts: [seeded])
+
+        try await env.repository.sync()
+
+        let stored = try #require(try await env.dao.getContact(uid: "srv-1"))
+        #expect(stored.pgpKey == "same-key")
+        #expect(stored.pendingPgpKey == nil)
+    }
+
+    @Test func acceptingAPendingKeyReplacesTheStoredKey() async throws {
+        let env = try makeEnvironment(client: stubClient())
+        var contact = makeContact(uid: "srv-1", name: "Bob")
+        contact.pgpKey = "verified-key"
+        contact.pendingPgpKey = "new-key"
+        try await env.dao.upsert(contacts: [contact])
+
+        try await env.repository.acceptPendingPgpKey(for: contact)
+
+        let stored = try #require(try await env.dao.getContact(uid: "srv-1"))
+        #expect(stored.pgpKey == "new-key")
+        #expect(stored.pendingPgpKey == nil)
+    }
+
+    @Test func dismissingAPendingKeyKeepsTheExistingKey() async throws {
+        let env = try makeEnvironment(client: stubClient())
+        var contact = makeContact(uid: "srv-1", name: "Bob")
+        contact.pgpKey = "verified-key"
+        contact.pendingPgpKey = "attacker-key"
+        try await env.dao.upsert(contacts: [contact])
+
+        try await env.repository.dismissPendingPgpKey(for: contact)
+
+        let stored = try #require(try await env.dao.getContact(uid: "srv-1"))
+        #expect(stored.pgpKey == "verified-key")
+        #expect(stored.pendingPgpKey == nil)
     }
 }
 
